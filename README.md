@@ -9,7 +9,7 @@ During restoring user will be able to specify specific regions(part of the world
 
 ## Requirements
 For our project to be successful, it should:
-- without damaging them
+- Dont damage the data of users world
 - Support committing current changes
 - Provide rollback capabilities to restore previous versions
 - Allow to specify specific regions to be restored
