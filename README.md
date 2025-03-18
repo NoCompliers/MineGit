@@ -1,4 +1,5 @@
 ## MineGit
+## Something
 Project will provide a version control system, simular to git, for a minecraft worlds
 --- 
 Program w'ont work directly with a game, instead it will only work with world files
