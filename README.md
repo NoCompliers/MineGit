@@ -20,13 +20,14 @@ Supports: Minecraft: Java Edition 1.12.2+
 
 Not Guaranteed: Compatibility with other Minecraft editions and older versions.
 
-Dependencies
+## Dependencies
 Dependencies listed here might not be used in the final project:
 
 fs_extra (for file copying)
 clap (CLI interface)
 zstd (file compression)
 
+## Aditional
 MineGit will use the Rust programming language.
 
 Through this project, we hope to learn about efficient data storage, Rust-based file operations, and how to handle binary world files effectively.
