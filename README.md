@@ -34,4 +34,4 @@ Through this project, we hope to learn about efficient data storage, Rust-based 
 Also some insights of how git works
 
 ## Developed By
-This project is being developed by [@ROmanHanushchak](https://github.com/ROmanGanushchak) and [@BRUH1284](https://github.com/BRUH1284) (Vladimir Riazantsev)
+This project is being developed by [@ROmanHanushchak](https://github.com/ROmanGanushchak) (Roman Hanushchak) and [@BRUH1284](https://github.com/BRUH1284) (Vladimir Riazantsev)
