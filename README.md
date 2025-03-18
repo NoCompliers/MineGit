@@ -23,9 +23,9 @@ Not Guaranteed: Compatibility with other Minecraft editions and older versions.
 ## Dependencies
 Dependencies listed here might not be used in the final project:
 
-fs_extra (for file copying)
-clap (CLI interface)
-zstd (file compression)
+- fs_extra (for file copying)
+- clap (CLI interface)
+- zstd (file compression)
 
 ## Aditional
 MineGit will use the Rust programming language.
