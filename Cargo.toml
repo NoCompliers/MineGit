@@ -3,4 +3,9 @@ name = "MineGit"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "minegit"
+path = "src/main.rs"
+
 [dependencies]
+clap = { version = "4.5.32", features = ["derive"] }
