@@ -1,7 +1,7 @@
-use crate::args::{Commands, MineGitArgs};
+use crate::args::*;
+use crate::initializer;
 
 use clap::Parser;
-
 // Runs the CLI application
 pub fn run() {
     let args = MineGitArgs::parse();
@@ -10,6 +10,7 @@ pub fn run() {
     match args.command {
         Commands::Init => {
             println!("Init called");
+            initializer::init();
         }
     }
 }
