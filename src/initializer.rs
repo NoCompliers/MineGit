@@ -1,4 +1,7 @@
-use crate::utils::fs_utils;
+use crate::{
+    savefiles::Config,
+    utils::fs_utils::{self, create_file},
+};
 
 pub fn init() {
     // Get current path
@@ -11,8 +14,16 @@ pub fn init() {
     };
 
     // Create a directory
-    let _ = fs_utils::create_dir(&path, "testName", false);
-    // TODO: Handle result
+    if let Err(e) = fs_utils::create_dir(&path, "minegit", true) {
+        init_error(e.to_string());
+        return;
+    }
+
+    // Create config file
+    let conf = Config {
+        ignored_paths: Vec::new(),
+    };
+    create_file(&path, "config", false, &conf);
 }
 
 fn init_error(error: String) {

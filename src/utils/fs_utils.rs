@@ -1,6 +1,9 @@
 use std::fs;
-use std::io;
+use std::fs::File;
+use std::io::{self, Write};
 use std::path::PathBuf;
+
+use serde::Serialize;
 
 pub fn is_path_exists(path: &str) -> bool {
     std::path::Path::new(path).exists()
@@ -20,4 +23,17 @@ pub fn create_dir(path: &str, name: &str, hidden: bool) -> io::Result<String> {
     }
 
     Ok(path)
+}
+
+pub fn create_file<T: Serialize>(path: &str, name: &str, hidden: bool, content: &T) {
+    // Serialize provided content
+    let json = serde_json::to_string(content).unwrap();
+
+    // Create file path
+    let path = format!("{}/{}{}", path, if hidden { "." } else { "" }, name);
+    // Create file
+    let mut file = File::create(path).expect("File creation failed!");
+
+    // Write json to file
+    file.write_all(json.as_bytes()).expect("Json write failed!");
 }
