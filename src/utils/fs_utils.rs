@@ -4,6 +4,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 pub fn is_path_exists(path: &str) -> bool {
     std::path::Path::new(path).exists()
@@ -36,4 +37,33 @@ pub fn create_file<T: Serialize>(path: &str, name: &str, hidden: bool, content: 
 
     // Write json to file
     file.write_all(json.as_bytes()).expect("Json write failed!");
+}
+
+pub fn files_equal(path1: &str, path2: &str, compare_metadata: bool) -> bool {
+    // Check metadata
+    if compare_metadata {
+        // Get files metadata
+        let meta1 = fs::metadata(path1).unwrap();
+        let meta2 = fs::metadata(path2).unwrap();
+        // Compare metadata
+        if meta1.modified().unwrap() != meta2.modified().unwrap() {
+            return false;
+        }
+    }
+    // Compare file content hash
+    if file_hash(path1) != file_hash(path2) {
+        return false;
+    }
+    // Files are equal
+    true
+}
+
+pub fn file_hash(path: &str) -> Vec<u8> {
+    // Create hasher
+    let mut hasher = Sha256::new();
+    // Open file
+    let mut file = fs::File::open(path).unwrap();
+    // Create and return file hash
+    let _n = io::copy(&mut file, &mut hasher).unwrap();
+    hasher.finalize().to_ascii_uppercase()
 }

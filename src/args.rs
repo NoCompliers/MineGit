@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about)]
@@ -11,4 +11,13 @@ pub struct MineGitArgs {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     Init,
+    Compare(CompareArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CompareArgs {
+    pub path1: String,
+    pub path2: String,
+    #[clap(short, long, default_value_t = false)]
+    pub meta: bool,
 }
