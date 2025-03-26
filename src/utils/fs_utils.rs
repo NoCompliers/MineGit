@@ -39,7 +39,14 @@ pub fn create_file<T: Serialize>(path: &str, name: &str, hidden: bool, content: 
     file.write_all(json.as_bytes()).expect("Json write failed!");
 }
 
-pub fn files_equal(path1: &str, path2: &str, compare_metadata: bool) -> bool {
+pub fn files_equal(path1: &str, path2: &str, compare_metadata: bool) -> Result<bool, String> {
+    // Check if paths are valid
+    for p in [path1, path2] {
+        if !is_path_exists(&p) {
+            return Err(format!("File {} not exist!", &p));
+        }
+    }
+
     // Check metadata
     if compare_metadata {
         // Get files metadata
@@ -47,15 +54,15 @@ pub fn files_equal(path1: &str, path2: &str, compare_metadata: bool) -> bool {
         let meta2 = fs::metadata(path2).unwrap();
         // Compare metadata
         if meta1.modified().unwrap() != meta2.modified().unwrap() {
-            return false;
+            return Ok(false);
         }
     }
     // Compare file content hash
     if file_hash(path1) != file_hash(path2) {
-        return false;
+        return Ok(false);
     }
     // Files are equal
-    true
+    Ok(true)
 }
 
 pub fn file_hash(path: &str) -> Vec<u8> {
