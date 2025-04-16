@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+chrono = "0.4"
+flate2 = "1.0"
+
+# other deps
+byteorder = "1.5.0
+divsufsort = "1.0.2"
