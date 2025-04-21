@@ -1,4 +1,5 @@
 use crate::args::*;
+use crate::committer;
 use crate::initializer;
 use crate::utils::fs_utils;
 
@@ -7,18 +8,27 @@ use clap::Parser;
 pub fn run() {
     let args = MineGitArgs::parse();
 
+    // Get current path
+    let root_path = fs_utils::get_path().unwrap();
+
     // Handle arguments
     match args.command {
         Commands::Init => {
             println!("Init called");
-            initializer::init();
+            initializer::init(&root_path).unwrap_or_else(|e| panic!("{e}"));
+        }
+        Commands::Status => {
+
+        }
+        Commands::Commit(args) => {
+            for i in 0..100 {
+                committer::add_commit(&root_path, &args.tag, 0).unwrap();
+            }
         }
         Commands::Compare(args) => {
             // Compare files
-            let equal = match fs_utils::files_equal(&args.path1, &args.path2, args.meta) {
-                Ok(x) => x,
-                Err(e) => panic!("{e}"),
-            };
+            let equal = fs_utils::files_equal(&args.path1, &args.path2, args.meta)
+                .unwrap_or_else(|e| panic!("{e}"));
             println!("Files are{} equal.", if equal { "" } else { " not" });
         }
     }

@@ -1,32 +1,25 @@
+use std::error::Error;
+
 use crate::{
-    savefiles::Config,
-    utils::fs_utils::{self, create_file},
+    committer::add_commit,
+    savefiles::{Commit, COMMITS_FILE_NAME, DIRECTORY_NAME, IGNORE_FILE_NAME},
+    utils::fs_utils::{self, write_json_file},
 };
 
-pub fn init() {
-    // Get current path
-    let path = match fs_utils::get_path() {
-        Ok(x) => x.to_str().unwrap().to_owned(), // Convert to owned String
-        Err(e) => {
-            init_error(e.to_string());
-            return; // Early return on error
-        }
-    };
+pub fn init(target_path: &str) -> Result<(), Box<dyn Error>> {
+    //TODO: check if repo is exists
 
     // Create a directory
-    if let Err(e) = fs_utils::create_dir(&path, "minegit", true) {
-        init_error(e.to_string());
-        return;
-    }
+    let dir_path = fs_utils::make_dir(&target_path, DIRECTORY_NAME, true)?;
 
-    // Create config file
-    let conf = Config {
-        ignored_paths: Vec::new(),
-    };
-    create_file(&path, "config", false, &conf);
-}
+    // Create ignore file
+    let patterns = [".git/*", "target/*"];
 
-fn init_error(error: String) {
-    eprintln!("{error}");
-    panic!();
+    fs_utils::write_file(
+        &format!("{dir_path}/{IGNORE_FILE_NAME}"),
+        patterns.join("\n").as_bytes(),
+    )?;
+
+    add_commit(&target_path, "Initial Commit.",0)?;
+    Ok(())
 }

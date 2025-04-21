@@ -8,7 +8,12 @@ name = "minegit"
 path = "src/main.rs"
 
 [dependencies]
+bitcode = "0.6.6"
+bytemuck = "1.22.0"
+chrono = "0.4.40"
 clap = { version = "4.5.32", features = ["derive"] }
+glob = "0.3.2"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 sha2 = "0.10.8"
+zstd = "0.13.3"

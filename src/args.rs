@@ -11,6 +11,8 @@ pub struct MineGitArgs {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     Init,
+    Status,
+    Commit(CommitArgs),
     Compare(CompareArgs),
 }
 
@@ -20,4 +22,9 @@ pub struct CompareArgs {
     pub path2: String,
     #[clap(short, long, default_value_t = false)]
     pub meta: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct CommitArgs {
+    pub tag: String,
 }
