@@ -23,14 +23,11 @@ impl DiffGenerator {
         }
     }
 
-    pub fn init(&mut self, src: &mut File, trg: &mut File) -> io::Result<()> {
+    pub fn init<R: Read>(&mut self, src: &mut R, trg: &mut R) -> io::Result<()> {
         let start = Instant::now();
-        self.n = src.metadata()?.len() as usize;
-        let m = trg.metadata()?.len() as usize;
-
         self.data.clear();
-        self.data.reserve_exact(self.n + m);
-        src.read_to_end(&mut self.data)?;
+
+        self.n = src.read_to_end(&mut self.data)?;
         trg.read_to_end(&mut self.data)?;
         print!("DiffGen init finished, time taken: {:?}\n", start.elapsed().as_millis());
         Ok(())
@@ -102,16 +99,16 @@ impl DiffGenerator {
                 continue; 
             }
             if save_from != i {
-                Insert::serialize(&data[save_from+n..i+n], out)?;
+                Insert::serialize(out, &data[save_from+n..i+n], false)?;
             }
-            Copy { sidx: j as u64, len: l as u64 }.serialize(out)?;
+            DiffCommandHeader::Copy(Copy {sidx: j as u64, len: l as u64}).serialize(out)?;
 
             i += l;
             save_from = i;
         }
         print!("finding diff: {:?}\n", start.elapsed().as_millis());
         if save_from != m {
-            Insert::serialize(&data[save_from+n..m+n], out)?;
+            Insert::serialize(out, &data[save_from+n..m+n], false)?;
         }
         print!("Init closest finished\n");
         Ok(())

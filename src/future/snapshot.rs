@@ -1,9 +1,9 @@
-use std::fs::{File};
+use std::fs::File;
 use std::io::{self, Write, Read, Seek, SeekFrom};
 use byteorder::{WriteBytesExt, ReadBytesExt, BigEndian};
 
-use crate::region::{HEADER_SIZE};
-use crate::recover::recover_test;
+use crate::region::{RegionFactory, HEADER_SIZE};
+use crate::recover::recover;
 pub struct IntervalMapping {
     old_idx: u64,
     new_idx: u64,
@@ -45,7 +45,7 @@ impl SnapshotHeader {
         Ok(())
     }
 
-    pub fn deserialize<R: Read>(r: &mut R) -> io::Result<Self> {
+    pub fn deserialize<R: Read + Seek>(r: &mut R) -> io::Result<Self> {
         let mut res = Self::default();
         res.depend_on = r.read_u64::<BigEndian>()?;
         res.payload_len = r.read_u64::<BigEndian>()?;
@@ -53,22 +53,25 @@ impl SnapshotHeader {
         let bits = r.read_u8()?;
         res.is_zipped = (bits & 1) != 0;
         res.is_mca_file = (bits & 0x10) != 0;
+        res.pos = r.stream_position()?;
         Ok(res)
     }
 
-    pub fn get_header(f: &mut File, offset: u64) -> io::Result<Vec<u8>> {
-        f.seek(io::SeekFrom::Start(offset))?;
-        let snapheader = SnapshotHeader::deserialize(f)?;
-        if !snapheader.is_mca_file {
+    pub fn get_header(snap: &SnapshotHeader, f: &mut File) -> io::Result<Vec<u8>> {
+        f.seek(io::SeekFrom::Start(snap.pos + SNAPSHOT_HEADER_SIZE as u64))?;
+        if !snap.is_mca_file {
             return Err(io::Error::new(io::ErrorKind::Other, "Trying to read header of not .mca file"));
         }
-        if !snapheader.is_zipped {
-            f.seek(io::SeekFrom::Current(-(offset as i64)))?;
+        let mut data: Vec<u8>;
+        if snap.depend_on == u64::MAX {
+            debug_assert!(snap.is_zipped == false, "No support for zipped .mca files");
+            data = vec![0u8; HEADER_SIZE];
+            f.read_exact(&mut data)?;
+        } else {
+            data = recover(f, snap.pos)?;
         }
-        let mut data = vec![0u8; HEADER_SIZE];
-        f.read_exact(&mut data)?;
 
-        Ok(vec![])
+        Ok(data)
     }
 
     fn get_intervals_mca(&self, f: &mut File, mut ints: Vec<IntervalMapping>, buf: &mut [u8]) -> io::Result<Vec<u8>> {
@@ -76,7 +79,7 @@ impl SnapshotHeader {
             return Err(io::Error::new(io::ErrorKind::Other, "Trying to get intervals of mca file for not final snapshot, this file relies on the other file"));
         }
 
-        let header = SnapshotHeader::get_header(f, self.pos + SNAPSHOT_HEADER_SIZE as u64)?;
+        let header = SnapshotHeader::get_header(self, f)?;
         for i in &mut ints {
             if i.old_idx >= HEADER_SIZE as u64 { break; }
             let len = (HEADER_SIZE as u64).min(i.old_idx + i.len) - i.old_idx;

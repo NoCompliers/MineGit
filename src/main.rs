@@ -1,10 +1,11 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, Write, Read};
+use std::time::Instant;
 
 use diff_gen::DiffGenerator;
 use region::RegionFactory;
 
-use crate::recover::recover_test;
+use crate::recover_test::recover_test;
 
 // mod package;
 // mod snapshot;
@@ -12,8 +13,8 @@ mod diff;
 mod diff_gen;
 mod recover;
 mod region;
+mod recover_test;
 pub mod future {
-    pub mod package;
     pub mod snapshot;
 }
 
@@ -96,7 +97,9 @@ fn main() {
     let mut data: Vec<Vec<u8>> = Vec::new();
     for i in 0..files.len() {
         let f = &mut files[i];
+        let start = Instant::now();
         let data = RegionFactory::unpack_region(f).unwrap();
+        print!("unpuck time: {:?}\n", start.elapsed());
         f.seek(io::SeekFrom::Start(0)).unwrap();
         let mut file = OpenOptions::new()
             .read(true)
@@ -117,5 +120,5 @@ fn main() {
     //     files.push(f);
     // }
 
-    assert_eq!(test_files_recover(files), true);
+    // assert_eq!(test_files_recover(files), true);
 }

@@ -1,8 +1,10 @@
 use std::cmp::Ordering;
-use std::fs::{self, File};
+use std::collections::BinaryHeap;
+use std::fs::File;
 use std::io::{self, Read, SeekFrom, Seek};
 use flate2::read::{GzDecoder, ZlibDecoder};
 use byteorder::{ReadBytesExt, BigEndian};
+use crate::recover::Instruction;
 
 use crate::future::snapshot::SnapshotHeader;
 // use crate::
@@ -11,12 +13,7 @@ pub const HEADER_FIELDS_CNT: usize = 1024;
 pub const HEADER_SIZE: usize = HEADER_FIELDS_CNT * 4 * 2;
 pub const SECTOR_SIZE: u64 = 4096;
 
-struct Region {
-    // offsets: [u32; HEADER_FIELDS_CNT],
-    // mod_times: [u32; HEADER_FIELDS_CNT],
-    // buffer: Vec<u8>
-}
-
+struct Region {}
 pub struct RegionFactory {}
 impl RegionFactory {
     fn uncompress_chunk_data(data: &[u8], comp_type: u8, chunk: &mut Vec<u8>) -> Result<usize, std::io::Error> {
@@ -134,7 +131,42 @@ fn read_u32(data: &[u8], idx: usize) -> u32 {
 }
 
 impl RegionFactory {
-    fn _get_changes(old: & [u8; HEADER_SIZE], new: &[u8; HEADER_SIZE], time: u32) -> Vec<RegionDiffInstruction> {
+    fn recover_data<R: Read + Seek>(f: &mut R, data: &mut[u8], snap: &SnapshotHeader, ops: &mut BinaryHeap<Instruction>) -> io::Result<()> {
+        debug_assert!(snap.is_mca_file && snap.depend_on == u64::MAX, "Invalide snapshot input for recover_data");
+
+        let mut buf: Vec<u8> = vec![0; HEADER_SIZE];
+        let mut undecoded_buf: Vec<u8> = Vec::new();
+
+        f.seek(io::SeekFrom::Start(snap.pos))?;
+        f.read_exact(&mut buf)?;
+        let mut idx: u64 = 0;
+
+        loop {
+            while let Some(op) = ops.peek() {
+                if op.from >= idx + buf.len() as u64 { break; }
+                let op = ops.pop().unwrap();
+                let len = op.len.min(idx + buf.len() as u64 - op.from);
+                data[op.to as usize..(op.to+len) as usize]
+                    .copy_from_slice(&buf[(op.from-idx) as usize..(op.from-idx+len) as usize]);
+                if len != op.len {
+                    ops.push(Instruction { from: op.from+len, to: op.to+len, len: op.len-len });
+                }
+            }
+
+            idx += buf.len() as u64;            
+            
+            if idx == snap.payload_len { break; }
+            let length = f.read_u32::<BigEndian>().unwrap() as usize;
+            let comp_type = f.read_u8().unwrap();
+            undecoded_buf.resize(length-1, 0);
+            f.read_exact(&mut undecoded_buf);
+            Self::uncompress_chunk_data(data, comp_type, &mut buf);
+        }
+
+        Ok(())
+    }
+
+    fn _get_changes(old: &[u8; HEADER_SIZE], new: &[u8; HEADER_SIZE], time: u32) -> Vec<RegionDiffInstruction> {
         let mut v: Vec<Info> = Vec::with_capacity(HEADER_FIELDS_CNT);
         for i in 0..HEADER_FIELDS_CNT {
             let offset = read_u32(new, i*4);
@@ -176,12 +208,12 @@ impl RegionFactory {
         ins
     }
 
-    pub fn get_changes(pack: &mut File, snap: u64, file: &mut File) -> io::Result<Vec<RegionDiffInstruction>> {
-        pack.seek(io::SeekFrom::Start(snap))?;
-        let snapheader = SnapshotHeader::deserialize(pack)?;
-        let mut data = vec![0u8; snapheader.payload_len as usize];
-        pack.read_exact(&mut data)?;
+    // pub fn get_changes(pack: &mut File, snap: u64, file: &mut File) -> io::Result<Vec<RegionDiffInstruction>> {
+    //     pack.seek(io::SeekFrom::Start(snap))?;
+    //     let snapheader = SnapshotHeader::deserialize(pack)?;
+    //     let mut data = vec![0u8; snapheader.payload_len as usize];
+    //     pack.read_exact(&mut data)?;
 
-        Ok(vec![])
-    }
+    //     Ok(vec![])
+    // }
 }
