@@ -23,7 +23,7 @@ impl DiffGenerator {
         }
     }
 
-    pub fn init<R: Read>(&mut self, src: &mut R, trg: &mut R) -> io::Result<()> {
+    pub fn init<R1: Read, R2: Read>(&mut self, src: &mut R1, trg: &mut R2) -> io::Result<()> {
         let start = Instant::now();
         self.data.clear();
 

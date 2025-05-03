@@ -25,6 +25,24 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Debug commit 'minegit'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=minegit",
+                    "--package=MineGit"
+                ],
+                "filter": {
+                    "name": "minegit",
+                    "kind": "bin"
+                }
+            },
+            "args": ["commit", "debug_commit"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug init 'minegit'",
             "cargo": {
                 "args": [

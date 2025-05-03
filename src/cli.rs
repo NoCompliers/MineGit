@@ -9,7 +9,7 @@ pub fn run() {
     let args = MineGitArgs::parse();
 
     // Get current path
-    let root_path = fs_utils::get_path().unwrap();
+    let root_path = fs_utils::get_current_path().unwrap();
 
     // Handle arguments
     match args.command {
@@ -21,9 +21,13 @@ pub fn run() {
 
         }
         Commands::Commit(args) => {
-            for i in 0..100 {
-                committer::add_commit(&root_path, &args.tag, 0).unwrap();
-            }
+            committer::add_commit(&root_path, &args.tag, 0).unwrap();
+        }
+        Commands::List => {
+            committer::print_all_commits(&root_path).unwrap();
+        }
+        Commands::Restore(args) => {
+            committer::restore(&root_path, args.id).unwrap();
         }
         Commands::Compare(args) => {
             // Compare files

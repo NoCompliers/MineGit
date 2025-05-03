@@ -1,7 +1,7 @@
-use std::fs::{self, DirEntry};
+use std::fs::{self, create_dir_all, DirEntry};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bitcode::{Decode, DecodeOwned, Encode};
 use serde::de::DeserializeOwned;
@@ -12,24 +12,34 @@ pub fn is_path_exists(path: &str) -> bool {
     std::path::Path::new(path).exists()
 }
 
-pub fn get_path() -> io::Result<String> {
-    let path = std::env::current_dir()?;
+fn path_to_string(path: &Path) -> io::Result<String> {
     let path_str = path.to_str().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "Failed to convert path to string")
+        io::Error::new(io::ErrorKind::InvalidData, "Failed to convert path to string")
     })?;
     Ok(path_str.to_string())
 }
 
-pub fn make_dir(path: &str, name: &str, hidden: bool) -> io::Result<String> {
-    // Create the path string
-    let full_path = format!("{}/{}{}", path, if hidden { "." } else { "" }, name);
-
-    // Check if directory already exists and create if it is not
-    if !is_path_exists(&full_path) {
-        fs::create_dir(&full_path)?;
+pub fn build_path<I: IntoIterator<Item = S>, S: AsRef<Path>>(sequence: I) -> io::Result<String> {
+    let mut path = PathBuf::new();
+    for part in sequence {
+        path.push(part);
     }
+    path_to_string(&path)
+}
 
-    Ok(full_path)
+pub fn get_current_path() -> io::Result<String> {
+    let path = std::env::current_dir()?;
+    path_to_string(&path)
+}
+
+pub fn make_dir(path: &str) -> io::Result<()>{
+    fs::create_dir(&path)?;
+    Ok(())
+}
+
+pub fn remove_file(path: &str) -> io::Result<()> {
+    fs::remove_file(&path)?;
+    Ok(())
 }
 
 pub fn write_file(path: &str, buf: &[u8]) -> io::Result<File> {
@@ -50,6 +60,23 @@ pub fn append_file(path: &str, buf: &[u8]) -> io::Result<(File, u64)> {
     Ok((file, pos))
 }
 
+pub fn open_to_write(path: &str, truncate: bool) -> io::Result<File> {
+    let path_obj = Path::new(path);
+
+    // Ensure parent directories exist
+    if let Some(parent) = path_obj.parent() {
+        create_dir_all(parent)?;  // Creates all missing directories in the path
+    }
+
+    // Open the file with write options
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(truncate)
+        .open(path_obj)
+}
+
 pub fn write_json_file<T: Serialize>(
     dir_path: &str,
     name: &str,
@@ -68,6 +95,12 @@ pub fn write_json_file<T: Serialize>(
 
 pub fn read_file(path: &str) -> Result<File, io::Error> {
     File::open(path)
+}
+
+pub fn read_to_end(path: &str, buf: &mut Vec<u8>) -> Result<usize, io::Error> {
+    let mut file = read_file(&path)?;
+
+    file.read_to_end(buf)
 }
 
 pub fn read_json_file<T: DeserializeOwned>(path: &str) -> Result<T, Box<dyn std::error::Error>> {

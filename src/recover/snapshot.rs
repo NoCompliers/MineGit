@@ -11,6 +11,8 @@ pub struct IntervalMapping {
 }
 
 pub const SNAPSHOT_HEADER_SIZE: usize = 25;
+
+#[derive(Clone)]
 pub struct SnapshotHeader {
     pub depend_on: u64,
     pub payload_len: u64,

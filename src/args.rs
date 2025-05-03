@@ -12,6 +12,8 @@ pub struct MineGitArgs {
 pub enum Commands {
     Init,
     Status,
+    List,
+    Restore(RestoreArgs),
     Commit(CommitArgs),
     Compare(CompareArgs),
 }
@@ -27,4 +29,9 @@ pub struct CompareArgs {
 #[derive(Debug, Args)]
 pub struct CommitArgs {
     pub tag: String,
+}
+
+#[derive(Debug, Args)]
+pub struct RestoreArgs {
+    pub id: u32,
 }

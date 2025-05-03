@@ -10,10 +10,10 @@ pub fn init(target_path: &str) -> Result<(), Box<dyn Error>> {
     //TODO: check if repo is exists
 
     // Create a directory
-    let dir_path = fs_utils::make_dir(&target_path, DIRECTORY_NAME, true)?;
-
+    let dir_path = fs_utils::build_path([&target_path, DIRECTORY_NAME])?;
+    fs_utils::make_dir(&dir_path)?;
     // Create ignore file
-    let patterns = [".git/*", "target/*"];
+    let patterns = [".git/*", "target/*", ".minegit/*", "src/*"];
 
     fs_utils::write_file(
         &format!("{dir_path}/{IGNORE_FILE_NAME}"),
