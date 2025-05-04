@@ -4,8 +4,8 @@ use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use flate2::read::ZlibDecoder;
 
-use crate::diff::DiffCommandHeader;
-use crate::future::snapshot::SnapshotHeader;
+use crate::delta::diff::DiffCommandHeader;
+use crate::delta::snapshot::SnapshotHeader;
 use std::mem;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -27,13 +27,13 @@ impl PartialOrd for Instruction {
     }
 }
 
-fn _recover<R: Read + Seek>(pack: &mut File, mut ops: BinaryHeap<Instruction>, mut snap: SnapshotHeader, size: u64, is_zip: bool) -> io::Result<Vec<u8>> {
+fn _recover<R: Read + Seek>(pack: &mut R, mut ops: BinaryHeap<Instruction>, mut snap: SnapshotHeader, size: u64, is_zip: bool) -> io::Result<Vec<u8>> {
     let mut file = vec![0u8; size as usize];
     let mut next: Vec<Instruction> = Vec::new();
     let mut buf: Vec<u8> = Vec::new();
-
+    
     pack.seek(io::SeekFrom::Start(snap.pos))?;
-    while snap.depend_on != u64::MAX {
+    loop {
         if snap.is_zipped {
             let mut decoder = ZlibDecoder::new(&mut *pack);
             decoder.read_to_end(&mut buf)?;
@@ -47,8 +47,7 @@ fn _recover<R: Read + Seek>(pack: &mut File, mut ops: BinaryHeap<Instruction>, m
         while !ops.is_empty() {
             let (op_head, red) = DiffCommandHeader::deserialize(&mut buf_cursor).unwrap();
             let is_zipped = match &op_head {
-                DiffCommandHeader::Copy(c) => false,
-                DiffCommandHeader::Insert(i) => false,
+                DiffCommandHeader::Copy(_) | DiffCommandHeader::Insert(_) => false,
                 _ => true
             };
 
@@ -96,17 +95,19 @@ fn _recover<R: Read + Seek>(pack: &mut File, mut ops: BinaryHeap<Instruction>, m
                     buf_cursor.seek(io::SeekFrom::Current(ins.len as i64))?;
                 }
             }
-            let mut heap_vec = mem::take(&mut ops).into_vec();
-            mem::swap(&mut heap_vec, &mut next);
-            ops = BinaryHeap::from(heap_vec);
-            next.clear();
         }
 
+        let mut heap_vec = mem::take(&mut ops).into_vec();
+        mem::swap(&mut heap_vec, &mut next);
+        ops = BinaryHeap::from(heap_vec);
+        next.clear();
+
+        if snap.depend_on == u64::MAX || ops.len() == 0 { break; }
         pack.seek(io::SeekFrom::Start(snap.depend_on))?;
         snap = SnapshotHeader::deserialize(pack)?;
     }  
 
-    Ok(vec![])
+    Ok(file)
 }
 
 pub fn recover(pack: &mut File, idx: u64) -> io::Result<Vec<u8>> {

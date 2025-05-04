@@ -2,29 +2,66 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fs::File;
 use std::io::{self, Read, SeekFrom, Seek};
-use flate2::read::{GzDecoder, ZlibDecoder};
+use flate2::read::GzDecoder;
 use byteorder::{ReadBytesExt, BigEndian};
-use crate::recover::Instruction;
+use libdeflater::{Decompressor, DecompressionError};
 
-use crate::future::snapshot::SnapshotHeader;
-// use crate::
+use crate::delta::recover::Instruction;
+use crate::delta::snapshot::SnapshotHeader;
 
 pub const HEADER_FIELDS_CNT: usize = 1024;
 pub const HEADER_SIZE: usize = HEADER_FIELDS_CNT * 4 * 2;
 pub const SECTOR_SIZE: u64 = 4096;
 
+fn read_u32(data: &[u8], idx: usize) -> u32 {
+    return u32::from_be_bytes(data[idx..idx+4].try_into().unwrap());
+}
+
+pub(crate) struct ChunkHeader {
+    pub offset: u32,
+    pub utime: u32,
+}
+impl ChunkHeader {
+    pub fn new(header: &[u8; HEADER_SIZE]) -> Vec<ChunkHeader> {
+        let mut chunks: Vec<ChunkHeader> = Vec::new();
+        for i in 0..HEADER_FIELDS_CNT {
+            let offset = read_u32(header, i*4);
+            if offset >> 8 == 0 || offset & 0xFF == 0 { continue; }
+            let timestamp = read_u32(header, SECTOR_SIZE as usize + i*4);
+            chunks.push(ChunkHeader {offset: (offset >> 8) * SECTOR_SIZE as u32, utime: timestamp});
+        }
+        chunks.sort_by(|a, b| a.offset.cmp(&b.offset));
+        chunks
+    }
+}
+
 struct Region {}
 pub struct RegionFactory {}
 impl RegionFactory {
-    fn uncompress_chunk_data(data: &[u8], comp_type: u8, chunk: &mut Vec<u8>) -> Result<usize, std::io::Error> {
+    fn uncompress_chunk_data(data: &[u8], comp_type: u8, chunk: &mut Vec<u8>) -> io::Result<usize> {
         match comp_type {
             1u8 => {
                 let mut decoder = GzDecoder::new(&data[..]);
                 return decoder.read_to_end(chunk);
             },
             2u8 | 0u8 => {
-                let mut decoder = ZlibDecoder::new(&data[..]);
-                return decoder.read_to_end(chunk);
+                let mut decompress = Decompressor::new();
+                chunk.resize(chunk.capacity().max(data.len()*4), 0);
+                loop {
+                    match decompress.zlib_decompress(data, chunk) {
+                        Ok(size) => {
+                            chunk.truncate(size);
+                            return Ok(size);
+                        },
+                        Err(DecompressionError::InsufficientSpace) => {
+                            chunk.resize(chunk.len()*2, 0);
+                            continue;
+                        },
+                        Err(_) => {
+                            return Err(io::Error::new(io::ErrorKind::Other, "Incorrect zlib compressed format"))
+                        }
+                    }
+                }
             },
             3u8 => {
                 chunk.clear();
@@ -37,20 +74,41 @@ impl RegionFactory {
         }
     }
 
-    pub fn get_chunk(mut file: &File, offset: u64) -> Result<Vec<u8>, io::Error> {
+    pub fn get_chunk_compressed(mut file: &File, offset: u64) -> io::Result<Vec<u8>> {
         let mut buffer: Vec<u8> = Vec::new();
 
         file.seek(SeekFrom::Start(offset)).unwrap();
         let length = file.read_u32::<BigEndian>().unwrap() as usize;
         if length <= 1 { return Ok(vec![]); }
+        file.read_u8().unwrap();
+        buffer.resize(length-1, 0);
+
+        file.read_exact(&mut buffer).unwrap();
+        return Ok(buffer);
+    }
+
+    fn _get_chunk(mut file: &File, offset: u64, chunk: &mut Vec<u8>) -> io::Result<()> {
+        let mut buffer: Vec<u8> = Vec::new();
+
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        let length = file.read_u32::<BigEndian>().unwrap() as usize;
+        if length <= 1 {
+            chunk.resize(0, 0);
+            return Ok(()); 
+        }
         let comp_type = file.read_u8().unwrap();
         buffer.resize(length-1, 0);
 
         file.read_exact(&mut buffer).unwrap();
 
-        let mut chunk = Vec::new();
-        Self::uncompress_chunk_data(&buffer, comp_type, &mut chunk)?;
+        Self::uncompress_chunk_data(&buffer, comp_type, chunk)?;
+        Ok(())
+    }
 
+    pub fn get_chunk(mut file: &File, offset: u64) -> io::Result<Vec<u8>> {
+        let mut chunk = Vec::new();
+        Self::_get_chunk(file, offset, &mut chunk)?;
+        
         Ok(chunk)
     }
 
@@ -60,6 +118,7 @@ impl RegionFactory {
         let mut buffer: Vec<u8> = Vec::new();
         buffer.extend(header);
 
+        let mut chunk: Vec<u8> = Vec::new();
         for i in 0..HEADER_FIELDS_CNT {
             let offset: u32 = u32::from_be_bytes(header[i*4..(i*4+4)].try_into().unwrap());
             if offset >> 8 == 0 || offset & 0xFF == 0 { 
@@ -67,7 +126,8 @@ impl RegionFactory {
             }
 
             let offset = (offset >> 8) as u64 * SECTOR_SIZE;
-            buffer.extend(Self::get_chunk(file, offset).unwrap());
+            Self::_get_chunk(file, offset, &mut chunk).unwrap();
+            buffer.extend(&chunk);
         }
 
         Some(buffer)
@@ -84,7 +144,7 @@ impl RegionFactory {
                 continue; 
             }
             let timestamp = u32::from_be_bytes(header[i*4..i*4+4].try_into().unwrap());
-            chunks.push((offset, timestamp));
+            chunks.push(((offset >> 8) * SECTOR_SIZE as u32, timestamp));
         }
 
         Ok(chunks)
@@ -124,10 +184,6 @@ impl Ord for Info {
     fn cmp(&self, other: &Self) -> Ordering {
         other.offset.cmp(&self.offset)
     }
-}
-
-fn read_u32(data: &[u8], idx: usize) -> u32 {
-    return u32::from_be_bytes(data[idx..idx+4].try_into().unwrap());
 }
 
 impl RegionFactory {
@@ -208,12 +264,11 @@ impl RegionFactory {
         ins
     }
 
-    // pub fn get_changes(pack: &mut File, snap: u64, file: &mut File) -> io::Result<Vec<RegionDiffInstruction>> {
-    //     pack.seek(io::SeekFrom::Start(snap))?;
-    //     let snapheader = SnapshotHeader::deserialize(pack)?;
-    //     let mut data = vec![0u8; snapheader.payload_len as usize];
-    //     pack.read_exact(&mut data)?;
+    pub fn get_changes(pack: &mut File, snap: SnapshotHeader, file: &mut File) -> io::Result<Vec<RegionDiffInstruction>> {
+        pack.seek(io::SeekFrom::Start(snap.pos))?;
+        let mut data = vec![0u8; snap.payload_len as usize];
+        pack.read_exact(&mut data)?;
 
-    //     Ok(vec![])
-    // }
+        Ok(vec![])
+    }
 }

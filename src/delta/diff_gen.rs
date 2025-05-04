@@ -1,8 +1,7 @@
 use divsufsort::sort_in_place;
-use std::fs::File;
 use std::io::{self, Read, Write};
 use std::time::Instant;
-use crate::diff::*;
+use crate::delta::diff::*;
 
 const MIN_COPY_SIZE: usize = 16;
 

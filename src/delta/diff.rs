@@ -126,11 +126,11 @@ impl DiffCommand {
     pub fn serialize<W: Write>(&self, w: &mut W) -> io::Result<()> {
         match self {
             Self::Insert(i) => {
-                DiffCommandHeader::Insert(InsertHeader { len: i.data.len() as u64 }).serialize(w);
+                DiffCommandHeader::Insert(InsertHeader { len: i.data.len() as u64 }).serialize(w)?;
                 w.write_all(&i.data)?;
             },
             Self::InsertZip(i) => {
-                DiffCommandHeader::InsertZip(InsertHeader { len: i.data.len() as u64 }).serialize(w);
+                DiffCommandHeader::InsertZip(InsertHeader { len: i.data.len() as u64 }).serialize(w)?;
                 w.write_all(&i.data)?;
             },
             _ => panic!("Use DiffCommandHeader serializer instead")
@@ -143,9 +143,9 @@ impl DiffCommand {
 impl Insert {
     pub fn serialize<W: Write>(w: &mut W, data: &[u8], is_zipped: bool) -> io::Result<()> {
         if !is_zipped {
-            DiffCommandHeader::Insert(InsertHeader { len: data.len() as u64 }).serialize(w);
+            DiffCommandHeader::Insert(InsertHeader { len: data.len() as u64 }).serialize(w)?;
         } else {
-            DiffCommandHeader::InsertZip(InsertHeader { len: data.len() as u64 }).serialize(w);
+            DiffCommandHeader::InsertZip(InsertHeader { len: data.len() as u64 }).serialize(w)?;
         }
         w.write_all(data)?;
         Ok(())

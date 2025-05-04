@@ -2,22 +2,20 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, Write, Read};
 use std::time::Instant;
 
-use diff_gen::DiffGenerator;
-use region::RegionFactory;
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
 
-use crate::recover_test::recover_test;
+use crate::delta::diff_gen::DiffGenerator;
+use crate::delta::region::{ChunkHeader, RegionFactory, HEADER_SIZE};
 
-// mod package;
-// mod snapshot;
-mod diff;
-mod diff_gen;
-mod recover;
-mod region;
-mod recover_test;
-pub mod future {
+mod delta {
+    pub mod diff;
+    pub mod diff_gen;
+    pub mod mca;
+    pub mod recover;
+    pub mod region;
     pub mod snapshot;
 }
-
 
 fn cmp_files(fa: &mut File, fb: &mut File) -> io::Result<bool> {
     fa.seek(io::SeekFrom::Start(0))?;
@@ -74,20 +72,21 @@ fn test_files_recover(mut files: Vec<File>) -> bool {
     original.seek(io::SeekFrom::Start(0)).unwrap();
     print!("Metadata size: {}\n", size);
 
-    let data = recover_test(_diffs, original, size).unwrap();
-    let mut recovered = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open("D:\\projects\\MineGitFork\\test_files\\recover\\generated\\recovered.mca").unwrap();
+    // let data = recover_test(_diffs, original, size).unwrap();
+    // let mut recovered = OpenOptions::new()
+    //     .read(true)
+    //     .write(true)
+    //     .create(true)
+    //     .truncate(true)
+    //     .open("D:\\projects\\MineGitFork\\test_files\\recover\\generated\\recovered.mca").unwrap();
     
-    recovered.write_all(&data).unwrap();
-    recovered.flush().unwrap();
-    cmp_files(&mut files.last_mut().unwrap(), &mut recovered).unwrap()
+    // recovered.write_all(&data).unwrap();
+    // recovered.flush().unwrap();
+    // cmp_files(&mut files.last_mut().unwrap(), &mut recovered).unwrap()
+    true
 }
 
-fn main() {
+fn _main() {
     let mut files = vec![
         File::open("D:\\projects\\MineGitFork\\test_files\\recover\\regions\\r.0.1.mca").unwrap(),
         File::open("D:\\projects\\MineGitFork\\test_files\\recover\\regions\\r.0.2.mca").unwrap(),
@@ -121,4 +120,88 @@ fn main() {
     // }
 
     // assert_eq!(test_files_recover(files), true);
+}
+
+fn get_max_update_time(header: &[u8; HEADER_SIZE]) -> u32 {
+    let chunks = ChunkHeader::new(header);
+    let mut max_time = 0;
+    for c in chunks {
+        max_time = max_time.max(c.utime);
+    }
+    return max_time;
+}
+
+fn main() -> io::Result<()> {
+    let mut f1 = File::open("D:\\projects\\MineGitFork\\test_files\\recover\\regions\\r.0.0.mca").unwrap();
+    let start = Instant::now();
+    RegionFactory::unpack_region(&mut f1);
+    print!("Unpacking time: {:?}\n", start.elapsed().as_millis());
+
+
+    /*let mut f1 = File::open("D:\\projects\\MineGitFork\\test_files\\recover\\regions\\r.0.0.mca").unwrap();
+    let mut f2 = File::open("D:\\projects\\MineGitFork\\test_files\\recover\\regions\\_r.0.0.mca").unwrap();
+
+    let mut header = vec![0u8; HEADER_SIZE];
+    f1.read_exact(&mut header[..])?;
+    let u1 = get_max_update_time(&header[..].try_into().unwrap());
+    f2.read_exact(&mut header[..])?;
+    let u2 = get_max_update_time(&header[..].try_into().unwrap());
+    print!("{}, {}\n", u1, u2);*/
+
+    Ok(())
+}
+
+fn __main() -> io::Result<()> {
+    let mut f = File::open("D:\\projects\\MineGitFork\\test_files\\recover\\regions\\r.0.1.mca").unwrap();
+    let header = RegionFactory::get_header(&mut f)?;
+    let mut sum1 = 0;
+    let mut sum2 = 0;
+    for i in 0..header.len() {
+        // print!("Offset: {}\n", header[i].0);
+        let data = RegionFactory::get_chunk(&mut f, header[i].0 as u64)?;
+
+        let start = Instant::now();
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&data).unwrap();
+        let compressed_data = encoder.finish().unwrap();
+        print!("First: {:?}\n", start.elapsed());
+
+        let chunk_data = RegionFactory::get_chunk_compressed(&mut f, header[i].0 as u64)?;
+
+        let interval = &chunk_data[chunk_data.len() - 4..];
+        let uncomp_size = u32::from_le_bytes(interval.try_into().expect("Slice length mismatch"));
+
+        print!("Uncomp Guess: {}, size: {}\n", uncomp_size, data.len());
+
+/*        // print!("Original: {}, Remade: {}\n", chunk_data.len(), compressed_data.len());
+
+        let start = Instant::now();
+        let mut compressor = Compressor::new(CompressionLvl::new(9).unwrap());
+        let max_compressed_size = compressor.zlib_compress_bound(data.len());
+        let mut compressed_data1 = vec![0u8; max_compressed_size];
+        let actual_size = compressor
+            .zlib_compress(&data, &mut compressed_data1)
+            .expect("Compression failed");
+        compressed_data1.truncate(actual_size);
+        print!("Second: {:?}\n", start.elapsed());
+
+        // assert!(chunk_data.len() >= compressed_data.len());
+
+        sum1 += compressed_data.len();
+        sum2 += compressed_data1.len();
+
+        if chunk_data == compressed_data {
+            print!("First works");
+        } 
+        if chunk_data == compressed_data1 {
+            print!("Second works");
+        }
+        if chunk_data != compressed_data && chunk_data != compressed_data1 {
+            print!("Unluck i guess, origin: {}, 0: {}, 1: {}\n", chunk_data.len(), compressed_data.len(), compressed_data1.len());
+        }*/
+    }
+
+    print!("S1: {}, S2: {}\n", sum1, sum2);
+
+    Ok(())
 }

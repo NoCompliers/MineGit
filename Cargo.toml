@@ -12,3 +12,4 @@ bincode = "1.3"
 # other deps
 byteorder = "1.5.0"
 divsufsort = "1.0.2"
+libdeflater = "1.23.1"
