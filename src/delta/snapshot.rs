@@ -2,13 +2,9 @@ use std::io::{self, Write, Read, Seek};
 use byteorder::{WriteBytesExt, ReadBytesExt, BigEndian};
 
 use crate::delta::diff::Insert;
-pub struct IntervalMapping {
-    old_idx: u64,
-    new_idx: u64,
-    len: u64
-}
 
 pub const SNAPSHOT_HEADER_SIZE: usize = 25;
+#[derive(Debug, Clone)]
 pub struct SnapshotHeader {
     pub depend_on: u64,
     pub payload_len: u64,
@@ -66,49 +62,8 @@ impl SnapshotHeader {
         };
         snap.serialize(f)?;
 
-        Insert::serialize(f, data, false)?;
-        return Ok(snap);
+        Insert::serialize(f, data)?;
+        Ok(snap)
     }
-
-    // pub fn get_header(snap: &SnapshotHeader, f: &mut File) -> io::Result<Vec<u8>> {
-    //     f.seek(io::SeekFrom::Start(snap.pos + SNAPSHOT_HEADER_SIZE as u64))?;
-    //     if !snap.is_mca_file {
-    //         return Err(io::Error::new(io::ErrorKind::Other, "Trying to read header of not .mca file"));
-    //     }
-    //     let mut data: Vec<u8>;
-    //     if snap.depend_on == u64::MAX {
-    //         debug_assert!(snap.is_zipped == false, "No support for zipped .mca files");
-    //         data = vec![0u8; HEADER_SIZE];
-    //         f.read_exact(&mut data)?;
-    //     } else {
-    //         data = recover(f, snap.pos)?;
-    //     }
-
-    //     Ok(data)
-    // }
-
-    // fn get_intervals_mca(&self, f: &mut File, mut ints: Vec<IntervalMapping>, buf: &mut [u8]) -> io::Result<Vec<u8>> {
-    //     if self.depend_on != u64::MAX {
-    //         return Err(io::Error::new(io::ErrorKind::Other, "Trying to get intervals of mca file for not final snapshot, this file relies on the other file"));
-    //     }
-
-    //     let header = SnapshotHeader::get_header(self, f)?;
-    //     for i in &mut ints {
-    //         if i.old_idx >= HEADER_SIZE as u64 { break; }
-    //         let len = (HEADER_SIZE as u64).min(i.old_idx + i.len) - i.old_idx;
-    //         buf[i.new_idx as usize..(i.new_idx+len) as usize]
-    //             .copy_from_slice(&header[i.old_idx as usize..(i.old_idx+len) as usize]);
-    //         i.old_idx += len;
-    //         i.new_idx += len;
-    //         i.len -= len;
-    //     }
-
-    //     for i in ints {
-    //         if i.len == 0 { continue; }
-            
-    //     }
-
-    //     Ok(vec![])
-    // }
 }
 

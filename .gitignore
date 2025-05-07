@@ -1,7 +1,9 @@
 debug/
 target/
-/target
-/minelite2
+minelite2/
+mem/
+test_files/
+todo!.md
 
 **/*.rs.bk
 

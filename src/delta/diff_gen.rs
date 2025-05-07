@@ -4,11 +4,9 @@ use std::time::Instant;
 use crate::delta::diff::*;
 
 const MIN_COPY_SIZE: usize = 16;
-
 pub struct DiffGenerator {
     pub data: Vec<u8>,
     closest: Vec<(usize, usize)>,
-    // commands: Vec<DiffCommand<'a>>,
     n: usize
 }
 
@@ -17,7 +15,6 @@ impl DiffGenerator {
         Self {
             data: Vec::new(),
             closest: Vec::new(),
-            // commands: Vec::new(),
             n: 0
         }
     }
@@ -98,7 +95,7 @@ impl DiffGenerator {
                 continue; 
             }
             if save_from != i {
-                Insert::serialize(out, &data[save_from+n..i+n], false)?;
+                Insert::serialize(out, &data[save_from+n..i+n])?;
             }
             DiffCommandHeader::Copy(Copy {sidx: j as u64, len: l as u64}).serialize(out)?;
 
@@ -107,7 +104,7 @@ impl DiffGenerator {
         }
         print!("finding diff: {:?}\n", start.elapsed().as_millis());
         if save_from != m {
-            Insert::serialize(out, &data[save_from+n..m+n], false)?;
+            Insert::serialize(out, &data[save_from+n..m+n])?;
         }
         print!("Init closest finished\n");
         Ok(())
