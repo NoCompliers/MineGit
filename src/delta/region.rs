@@ -17,9 +17,10 @@ pub fn zlib_decompress(source: &[u8], target: &mut Vec<u8>) -> io::Result<usize>
             },
             Err(DecompressionError::InsufficientSpace) => {
                 target.resize(target.len()*2, 0);
+                print!("NotEnoughtSpace\n");
                 continue;
             },
-            Err(_) => {
+            Err(DecompressionError::BadData) => {
                 return Err(io::Error::new(io::ErrorKind::Other, "Incorrect zlib compressed format"))
             }
         }
@@ -62,7 +63,7 @@ impl RegionFactory {
         return Ok(buffer);
     }
 
-    fn _get_chunk(mut file: &File, offset: u64, chunk: &mut Vec<u8>) -> io::Result<()> {
+    fn _get_chunk<R: Read+Seek>(file: &mut R, offset: u64, chunk: &mut Vec<u8>) -> io::Result<()> {
         let mut buffer: Vec<u8> = Vec::new();
 
         file.seek(SeekFrom::Start(offset)).unwrap();
@@ -80,14 +81,14 @@ impl RegionFactory {
         Ok(())
     }
 
-    pub fn get_chunk(mut file: &File, offset: u64) -> io::Result<Vec<u8>> {
+    pub fn get_chunk(file: &mut File, offset: u64) -> io::Result<Vec<u8>> {
         let mut chunk = Vec::new();
         Self::_get_chunk(file, offset, &mut chunk)?;
         
         Ok(chunk)
     }
 
-    pub fn unpack_region(file: &mut File) -> Option<Vec<u8>> {
+    pub fn unpack_region<R: Read+Seek>(file: &mut R) -> Option<Vec<u8>> {
         let mut header = [0u8; HEADER_SIZE];
         file.read_exact(&mut header).unwrap();
         let mut buffer: Vec<u8> = Vec::new();

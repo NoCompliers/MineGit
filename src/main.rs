@@ -1,6 +1,9 @@
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Seek, Write};
+use std::io::{self, Cursor, Seek, Write};
 use std::time::Instant;
+
+use byteorder::{ReadBytesExt, BigEndian};
+use delta::region::RegionFactory;
 
 use crate::delta::mca::MCA;
 
@@ -14,7 +17,8 @@ mod delta {
 }
 
 fn main() {
-    let mut f = File::open("D:\\projects\\MineGit\\test_files\\recover\\regions\\r.0.1.mca").unwrap();
+    let mut f  = File::open("D:\\projects\\MineGit\\test_files\\recover\\regions\\r.-1.0.mca").unwrap();
+    let mut f1 = File::open("D:\\projects\\MineGit\\test_files\\recover\\regions\\_r.-1.0.mca").unwrap();
     let mut out = OpenOptions::new()
             .read(true)
             .write(true)
@@ -24,9 +28,22 @@ fn main() {
 
     let start = Instant::now();
     let snap = MCA::save_new(&mut f, &mut out).unwrap();
-    print!("{:?}\nTime: {:?}\n", snap, start.elapsed());
 
     let data = MCA::recover(&snap, &mut out).unwrap();
+    let mut data = Cursor::new(data);
+    RegionFactory::unpack_region(&mut data).unwrap();
+    print!("Region unpacked\n");
+
+    /*f.seek(io::SeekFrom::Start(snap.pos)).unwrap();
+    let len = f.read_u32::<BigEndian>().unwrap() as usize;
+    let t = f.read_u8().unwrap();
+    let buf = vec![0u8; len];
+    let mut chunk: Vec<u8> = Vec::new();
+    RegionFactory::uncompress_chunk_data(&buf, t, &mut chunk).unwrap();*/
+
+    let snap1 = MCA::save(&snap, &mut out, &mut f1).unwrap();
+    let data = MCA::recover(&snap1, &mut out).unwrap();
+    print!("{:?}\nTime: {:?}\n", snap1, start.elapsed());
 
     let mut res = OpenOptions::new()
             .write(true)

@@ -2,33 +2,28 @@ use std::io::{ self, Write, Read };
 use byteorder::{ReadBytesExt, BigEndian};
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug)]
-pub(crate) struct Insert {
-    pub data: Vec<u8>
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub(crate) struct Copy {
     pub sidx: u64,
     pub len: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct InsertHeader {
     pub len: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct CopyZipHeader {
     pub pos: u64
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct InsertZipHeader {
     pub pos: u32
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum DiffCommandHeader {
     Copy(Copy),
     Insert(InsertHeader),
@@ -93,6 +88,11 @@ impl DiffCommandHeader {
     }
 }
 
+
+#[derive(Debug)]
+pub(crate) struct Insert {
+    pub data: Vec<u8>
+}
 impl Insert {
     pub fn serialize<W: Write>(w: &mut W, data: &[u8]) -> io::Result<()> {
         DiffCommandHeader::Insert(InsertHeader { len: data.len() as u64 }).serialize(w)?;

@@ -1,5 +1,5 @@
 use divsufsort::sort_in_place;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::time::Instant;
 use crate::delta::diff::*;
 
@@ -19,32 +19,27 @@ impl DiffGenerator {
         }
     }
 
-    pub fn init<R: Read>(&mut self, src: &mut R, trg: &mut R) -> io::Result<()> {
+    pub fn init(&mut self, src: &[u8], trg: &[u8]) {
         let start = Instant::now();
-        self.data.clear();
+        self.data.resize(src.len() + trg.len(), 0);
+        self.n = src.len();
+        self.data[..self.n].copy_from_slice(src);
+        self.data[self.n..].copy_from_slice(trg);
 
-        self.n = src.read_to_end(&mut self.data)?;
-        trg.read_to_end(&mut self.data)?;
-        print!("DiffGen init finished, time taken: {:?}\n", start.elapsed().as_millis());
-        Ok(())
+        // print!("DiffGen init finished, time taken: {:?}\n", start.elapsed().as_millis());
     }
 
     fn init_closest(&mut self) {
         let data = &self.data;
 
-        let start= Instant::now();
         let mut idxs = vec![0; data.len()];
-        print!("alloc for intervals time taken: {:?}\n", start.elapsed().as_millis());
         let start= Instant::now();
         sort_in_place(data, &mut idxs);
-        print!("sorting time taken: {:?}\n", start.elapsed().as_millis());
         let idxs: Vec<usize> = idxs.iter().map(|&x| x as usize).collect();
-        print!("with conversion taken: {:?}\n", start.elapsed().as_millis());
 
         let len = data.len();
         let n = self.n;
 
-        let start = Instant::now();
         let mut last_data: usize = 0;
         let mut i = 0;
         while i < len && idxs[i] >= n { i += 1; }
@@ -62,10 +57,9 @@ impl DiffGenerator {
                 closest[idx-n].0 = idxs[last_data-1];
             }
         }
-        print!("closest find time taken: {:?}\n", start.elapsed().as_millis());
     }
 
-    pub fn generate<W: Write>(&mut self, out: &mut W) -> io::Result<()> {
+    pub fn generate<W: Write>(&mut self, out: &mut W, offset: u64) -> io::Result<()> {
         self.init_closest();
         let data = &self.data;
         let n = self.n;
@@ -77,7 +71,6 @@ impl DiffGenerator {
         let mut save_from: usize = 0;
         let mut i = 0;
 
-        let start = Instant::now();
         while i < m {
             let (smaller, bigger) = closest[i];
             let mut l1 = 0;
@@ -97,16 +90,14 @@ impl DiffGenerator {
             if save_from != i {
                 Insert::serialize(out, &data[save_from+n..i+n])?;
             }
-            DiffCommandHeader::Copy(Copy {sidx: j as u64, len: l as u64}).serialize(out)?;
+            DiffCommandHeader::Copy(Copy {sidx: j as u64 + offset, len: l as u64}).serialize(out)?;
 
             i += l;
             save_from = i;
         }
-        print!("finding diff: {:?}\n", start.elapsed().as_millis());
         if save_from != m {
             Insert::serialize(out, &data[save_from+n..m+n])?;
         }
-        print!("Init closest finished\n");
         Ok(())
     }
 }

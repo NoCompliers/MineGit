@@ -62,7 +62,7 @@ fn insert_snap_data<R: Read + Seek>(snap: &SnapshotHeader, pack: &mut R, chunk_d
     };
     
     let diff_data_size = snap.payload_len as usize - (snap.chunk_data_size as usize + header_size as usize);
-    print!("payload: {}, chunk: {}, header: {} -> diff: {}\n", snap.payload_len, snap.chunk_data_size, header_size, diff_data_size);
+    print!("Recover: DiffZipStart: {}, size: {}\n", pack.stream_position()?, diff_data_size);
     if snap.is_zipped {
         let mut temp = vec![0u8; diff_data_size];
         pack.read_exact(&mut temp)?;
@@ -74,8 +74,7 @@ fn insert_snap_data<R: Read + Seek>(snap: &SnapshotHeader, pack: &mut R, chunk_d
     Ok(())
 }
 
-pub(super) fn _recover<R: Read + Seek>(pack: &mut R, mut ops: BinaryHeap<Instruction>, mut snap: SnapshotHeader, size: u64) -> io::Result<Vec<u8>> {
-    let mut file = vec![0u8; size as usize];
+pub(super) fn _recover<R: Read + Seek>(pack: &mut R, mut ops: BinaryHeap<Instruction>, mut snap: SnapshotHeader, file: &mut [u8]) -> io::Result<()> {
     let mut next: Vec<Instruction> = Vec::new();
     let mut chunk_data: Vec<u8> = Vec::with_capacity( snap.chunk_data_size as usize );
     let mut buf: Vec<u8> = Vec::with_capacity(snap.payload_len as usize);
@@ -151,7 +150,7 @@ pub(super) fn _recover<R: Read + Seek>(pack: &mut R, mut ops: BinaryHeap<Instruc
                     pack.read_exact(&mut temp_buf)?;
                     RegionFactory::uncompress_chunk_data(&temp_buf, comp_type, &mut temp_buf1)?;
                     
-                    chunk_insert_handler(&mut file, &temp_buf1, idx, &mut ops);
+                    chunk_insert_handler(file, &temp_buf1, idx, &mut ops);
                     idx += CHUNK_VIRTUAL_SPACE;
                 },
                 DiffCommandHeader::InsertZip(i) => {
@@ -166,7 +165,7 @@ pub(super) fn _recover<R: Read + Seek>(pack: &mut R, mut ops: BinaryHeap<Instruc
                     let comp_type = chunk_data[pos + 4];
                     RegionFactory::uncompress_chunk_data(&chunk_data[pos+5 .. pos+5+size], comp_type, &mut temp_buf1)?;
 
-                    chunk_insert_handler(&mut file, &temp_buf1, idx, &mut ops);
+                    chunk_insert_handler(file, &temp_buf1, idx, &mut ops);
                     idx += CHUNK_VIRTUAL_SPACE;
                 }
             }
@@ -182,7 +181,7 @@ pub(super) fn _recover<R: Read + Seek>(pack: &mut R, mut ops: BinaryHeap<Instruc
         snap = SnapshotHeader::deserialize(pack)?;
     }
 
-    Ok(file)
+    Ok(())
 }
 
 pub fn recover(pack: &mut File, idx: u64) -> io::Result<Vec<u8>> {
