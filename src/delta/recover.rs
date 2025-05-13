@@ -62,6 +62,7 @@ fn insert_snap_data<R: Read + Seek>(snap: &SnapshotHeader, pack: &mut R, chunk_d
     };
     
     let diff_data_size = snap.payload_len as usize - (snap.chunk_data_size as usize + header_size as usize);
+    print!("payload: {}, chunk: {}, header: {} -> diff: {}\n", snap.payload_len, snap.chunk_data_size, header_size, diff_data_size);
     if snap.is_zipped {
         let mut temp = vec![0u8; diff_data_size];
         pack.read_exact(&mut temp)?;
@@ -82,7 +83,7 @@ pub(super) fn _recover<R: Read + Seek>(pack: &mut R, mut ops: BinaryHeap<Instruc
     let mut temp_buf1: Vec<u8> = Vec::new();
 
     pack.seek(io::SeekFrom::Start(snap.pos))?;
-    loop {
+    while !ops.is_empty() {
         insert_snap_data(&snap, pack, &mut chunk_data, &mut buf)?;
 
         let mut idx: u64 = 0;

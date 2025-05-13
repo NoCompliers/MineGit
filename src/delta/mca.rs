@@ -1,4 +1,4 @@
-use std::{collections::BinaryHeap, fs::{self, File}, io::{self, Cursor, Read, Seek, Write}};
+use std::{collections::BinaryHeap, fs::File, io::{self, Cursor, Read, Seek, Write}};
 use libdeflater::{CompressionLvl, Compressor};
 use byteorder::{WriteBytesExt, ReadBytesExt, BigEndian};
 
@@ -22,6 +22,7 @@ pub fn write_u32(t: &mut[u8], pos: usize, val: u32) {
 
 use super::region::zlib_decompress;
 
+#[derive(Debug)]
 pub(crate) struct ChunkHeader {
     pub utime: u32,
     pub l_idx: u32,
@@ -31,31 +32,32 @@ pub(crate) struct ChunkHeader {
 impl ChunkHeader {
     pub const SERIZALIZED_SIZE: usize = 10;
 
-    pub fn new(header: &[u8; HEADER_SIZE]) -> Vec<ChunkHeader> {
+    pub(crate) fn new(header: &[u8; HEADER_SIZE]) -> Vec<ChunkHeader> {
         let mut chunks: Vec<ChunkHeader> = Vec::new();
-        let mut last_end = 0;
         for i in 0..HEADER_FIELDS_CNT {
             let offset = read_u32(header, i*4);
             if offset >> 8 == 0 || offset & 0xFF == 0 { continue; }
             let timestamp = read_u32(header, SECTOR_SIZE as usize + i*4);
             chunks.push(ChunkHeader {utime: timestamp, idx: i as u16, l_idx: u32::MAX, size: u32::MAX});
         }
-        chunks.sort_by(|a, b| a.l_idx.cmp(&b.l_idx));
         chunks
     }
 
     pub(crate) fn serialize_all<W: Write>(header: &Vec<ChunkHeader>, f: &mut W) -> io::Result<()> {
+        let mut size = 8;
         f.write_u32::<BigEndian>(header.len() as u32)?;
         for chunk in header {
             f.write_u32::<BigEndian>(chunk.utime)?;
             f.write_u32::<BigEndian>(chunk.l_idx)?;
             f.write_u16::<BigEndian>(chunk.idx)?;
+            size += 10;
         }
         if let Some(c) = header.last() {
             f.write_u32::<BigEndian>(c.size)?;
         } else {
             f.write_u32::<BigEndian>(0)?;
         }
+        print!("Serialized size: {}\n", size);
         Ok(())
     }
 
@@ -79,7 +81,8 @@ impl ChunkHeader {
     }
 
     pub(crate) fn skip_data<R: Read + Seek>(f: &mut R) -> io::Result<usize> {
-        let len = f.read_u32::<BigEndian>()? as i64 * Self::SERIZALIZED_SIZE as i64;
+        let len = f.read_u32::<BigEndian>()? as i64 * Self::SERIZALIZED_SIZE as i64 + 4;
+        print!("Skipped: {}\n", len+4);
         f.seek(io::SeekFrom::Current(len))?;
         Ok(len as usize)
     }
@@ -91,7 +94,7 @@ impl ChunkHeader {
     fn get_chunk_data(header: &[u8; HEADER_SIZE], idx: usize) -> (u32, u32) {
         debug_assert!(idx < HEADER_FIELDS_CNT);
         return (
-            read_u32(header, idx*4),
+            ( read_u32(header, idx*4) >> 8 ) * SECTOR_SIZE as u32,
             read_u32(header, SECTOR_SIZE as usize + idx*4)
         )
     }
@@ -116,9 +119,10 @@ impl MCA {
     }
 
     pub fn recover<R: Read + Seek>(snap: &SnapshotHeader, pack: &mut R) -> io::Result<Vec<u8>> {
-        use crate::delta::recover::{Instruction, CHUNK_VIRTUAL_SPACE, _recover};
+        use crate::delta::recover::{Instruction, _recover};
         pack.seek(io::SeekFrom::Start(snap.pos + snap.chunk_data_size as u64))?;
         let header = ChunkHeader::deserialize_all(pack)?;
+        print!("Header: {:?}\n", &header[..5]);
 
         let mut t_idx: u64 = 0;
         let mut idx: u64 = 0;
@@ -145,7 +149,10 @@ impl MCA {
             t_idx += h.size as u64;
         }
 
+        print!("Calling recover\n");
         let unzipped = _recover(pack, BinaryHeap::from(instructs), snap.clone(), idx)?;
+        print!("Recovered\n");
+
         let mut buf = vec![0u8; HEADER_SIZE];
         let mut comp = Compressor::new(CompressionLvl::fastest());
 
@@ -162,6 +169,10 @@ impl MCA {
             Self::update_header_and_normalize_size(&mut buf, &header, pos, n+5, c.idx);
         }        
         
+        if to_copy.len() == 0 { 
+            return Ok(buf); 
+        }
+
         let mut diff_data_zipped = vec![0u8; snap.payload_len as usize - (ChunkHeader::get_serialized_size(header.len()) + snap.chunk_data_size as usize)];
         pack.seek(io::SeekFrom::Start(
             snap.pos + snap.chunk_data_size as u64
@@ -171,13 +182,8 @@ impl MCA {
         let mut diff_data = unzipped; // moving buffer
         zlib_decompress(&diff_data_zipped, &mut diff_data)?;
 
-        if to_copy.len() == 0 { 
-            return Ok(buf); 
-        }
-
-        let stream_pos = pack.stream_position()? as i64;
-        pack.seek(io::SeekFrom::Current(stream_pos - snap.pos as i64))?;
-        let mut chunk_data = diff_data_zipped;
+        pack.seek(io::SeekFrom::Start(snap.pos))?;
+        let mut chunk_data = diff_data_zipped; // moving buffer
         chunk_data.resize(snap.chunk_data_size as usize, 0);
         pack.read_exact(&mut chunk_data)?;
         
@@ -192,7 +198,7 @@ impl MCA {
                     let len = pack.read_u32::<BigEndian>()? as usize;
                     let pos = buf.len();
                     buf.resize(buf.len() + len+5, 0);
-                    write_u32(&mut buf, pos, len as u32);
+                    write_u32(&mut buf, pos, len as u32); // ToDo! Check maybe len+1 is required
                     pack.read_exact(&mut buf[pos+4..])?;
 
                     let c = &header[to_copy[chunk_idx] as usize];
@@ -220,8 +226,7 @@ impl MCA {
         Ok(SnapshotHeader::default())
     }
 
-
-    /*  ToDo! figure out where chunk_data is wrote into the file */
+    /* ToDo! figure out where chunk_data is wrote into the file */
     pub fn save_new<W: Write + Seek, R: Read + Seek>(f: &mut R, pack: &mut W) -> io::Result<SnapshotHeader> {
         pack.seek(io::SeekFrom::End(0))?;
         let mut buf: Vec<u8> = Vec::new();
@@ -231,23 +236,25 @@ impl MCA {
 
         let mut out = Cursor::new(Vec::with_capacity(buf.len()) as Vec<u8>);
 
-        let _header = &buf[..HEADER_SIZE];
-        let mut header = ChunkHeader::new(_header.try_into().unwrap());
-        let mut chunk_zip_pos = vec![usize::MAX, header.len()];
+        let _header: &[u8; HEADER_SIZE] = &buf[..HEADER_SIZE].try_into().unwrap();
+        let mut header = ChunkHeader::new(_header);
+        let mut chunk_zip_pos = vec![usize::MAX; header.len()];
         let mut last = 0;
         let mut idx = 0;
 
         for i in 0..header.len() {
             let chunk = &mut header[i];
-            let (offset, _) = ChunkHeader::get_chunk_data(_header.try_into().unwrap(), chunk.idx as usize);
+            let (offset, _) = ChunkHeader::get_chunk_data(_header, chunk.idx as usize);
             let size = read_u32(&buf, offset as usize);
             out.write_all(&buf[offset as usize .. offset as usize + 5 + size as usize])?;
+            chunk.size = CHUNK_VIRTUAL_SPACE as u32;
             chunk.l_idx = idx as u32;
             idx += CHUNK_VIRTUAL_SPACE as usize;
             chunk_zip_pos[i] = last;
-            last += size as usize;
+            last += size as usize + 5; // changed
         }
         let chunk_data_size = out.position();
+        ChunkHeader::serialize_all(&header, &mut out)?;
 
         buf.clear(); // buf is now used as storage for copy commands
         let mut diff_data = Cursor::new(buf);
@@ -257,7 +264,7 @@ impl MCA {
             ).serialize(&mut diff_data)?;
         }
 
-        let compression_level = CompressionLvl::fastest();
+        let compression_level = CompressionLvl::fastest(); // ToDo! rewrite to zstd
         let mut comp = Compressor::new(compression_level);
 
         let pos = out.position() as usize;
@@ -280,7 +287,6 @@ impl MCA {
         };
 
         snap.serialize(pack)?;
-        ChunkHeader::serialize_all(&header, pack)?;
         pack.write_all(&buf)?;
 
         return Ok(snap);

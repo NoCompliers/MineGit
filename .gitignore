@@ -2,6 +2,7 @@ debug/
 target/
 minelite2/
 mem/
+.vscode/
 test_files/
 todo!.md
 

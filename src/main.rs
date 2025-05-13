@@ -28,6 +28,18 @@ fn main() {
 
     let data = MCA::recover(&snap, &mut out).unwrap();
 
+    let mut res = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("D:\\projects\\MineGit\\test_files\\r.0.1.mca").unwrap();
+    res.write_all(&data).unwrap();
+
+    print!("DataLen: {}\n", data.len());
+    f.seek(io::SeekFrom::Start(0)).unwrap();
+    let size = f.seek(io::SeekFrom::End(0)).unwrap();
+    print!("Original size: {}\n", size);
+
     // let start = Instant::now();
     // f.seek(io::SeekFrom::Start(0)).unwrap();
     // let mut buf = vec![0u8; f.metadata().unwrap().len() as usize];
