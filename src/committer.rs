@@ -1,5 +1,5 @@
 use bytemuck::{cast_slice, from_bytes};
-use chrono::Local;
+use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
@@ -42,11 +42,9 @@ pub fn add_commit(target_path: &str, tag: &str) -> Result<(), Box<dyn std::error
     match get_head(target_path) {
         Ok(value) => {
             parent_id = value;
-            println!("Head value: {}", value);
         }
         Err(e) => {
             write_head(target_path, 0)?;
-            eprintln!("Failed to read head: {}", e);
         }
     }
     // Read previous commits to tie them with new one
@@ -100,16 +98,25 @@ pub fn write_head(target_path: &str, value: u32) -> Result<(), Box<dyn Error>> {
 
 pub fn print_all_commits(target_path: &str) -> Result<(), Box<dyn Error>> {
     // Get commits
-    // let commits_info_file = fs_utils::read_file(&get_commits_info_path(target_path)?)?;
-    // let commits = read_all_commits(&target_path)?;
+    let commits_info_file = fs_utils::read_file(&get_commits_info_path(target_path)?)?;
+    let commits = read_all_commits(&target_path)?;
 
-    // for commit in commits {
-    //     println!(
-    //         "{}\n{}",
-    //         commit,
-    //         read_commit_info(&commits_info_file, commit.info_pos, commit.info_length)?
-    //     );
-    // }
+    for commit in commits {
+        let commit_info =
+            read_commit_info(&commits_info_file, commit.info_pos, commit.info_length)?;
+
+        let datetime = DateTime::from_timestamp(commit.timestamp, 0)
+            .unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap());
+
+        println!(
+            "Commit:\t\t{}\nId:\t\t{}\nParent commit:\t{}\nDate:\t\t{}\nFiles:\t\t{}\n--------",
+            commit.tag_as_str()?,
+            commit.id,
+            commit.parent_id,
+            datetime.format("%Y-%m-%d %H:%M:%S"),
+            commit_info.file_info.len(),
+        );
+    }
 
     Ok(())
 }
@@ -156,7 +163,7 @@ pub fn restore(target_path: &str, commit_id: u32) -> Result<(), Box<dyn Error>> 
             .contains_key(&str_to_fixed_bytes::<128>(&entry))
         {
             if fs_utils::is_path_exists(&entry) {
-                fs_utils::remove_file(&entry)?; // TODO: just ignore error
+                fs_utils::remove_file(&entry)?;
             }
         }
     }
