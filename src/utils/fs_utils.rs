@@ -20,6 +20,11 @@ fn path_to_string(path: &Path) -> io::Result<String> {
     Ok(path_str.to_string())
 }
 
+pub fn get_file_size<P: AsRef<Path>>(path: P) -> io::Result<u64> {
+    let metadata = std::fs::metadata(path)?;
+    Ok(metadata.len())
+}
+
 pub fn build_path<I: IntoIterator<Item = S>, S: AsRef<Path>>(sequence: I) -> io::Result<String> {
     let mut path = PathBuf::new();
     for part in sequence {
