@@ -11,7 +11,7 @@ use zstd::{decode_all, encode_all};
 use crate::ignore_filter::IgnoreFilter;
 use crate::recover::diff_gen::DiffGenerator;
 use crate::recover::recover::recover;
-use crate::recover::snapshot::SnapshotHeader;
+use crate::recover::snapshot::{SnapshotHeader, SNAPSHOT_HEADER_SIZE};
 use crate::savefiles::{CommitInfo, FileInfo, HEAD_FILE_NAME};
 use crate::{
     savefiles::{Commit, COMMITS_FILE_NAME, COMMITS_INFO_FILE_NAME, DIRECTORY_NAME},
@@ -383,12 +383,11 @@ async fn create_commit_info(
 
                     // Generate snapshot
                     let snapshot = SnapshotHeader {
-                        depend_on: parent_snapshot.pos - 25,
+                        depend_on: parent_snapshot.pos - SNAPSHOT_HEADER_SIZE as u64,
                         payload_len: diff_data.len() as u64,
                         file_len: origin.metadata().unwrap().len(),
                         pos: package.stream_position().unwrap() as u64, // useless
                         is_zipped: false,
-                        is_mca_file: false,
                     };
 
                     // Append snapshot to package
@@ -410,7 +409,7 @@ async fn create_commit_info(
                 let mut new_package = fs_utils::open_to_write(&output_path, false).unwrap();
                 let mut data = Vec::new();
                 fs_utils::read_to_end(&origin_path, &mut data).unwrap();
-                SnapshotHeader::store_file(&mut new_package, &data, false).unwrap(); //TODO: mca?
+                SnapshotHeader::store_file(&mut new_package, &data).unwrap(); //TODO: mca?
 
                 return Res {
                     k: path_bytes,

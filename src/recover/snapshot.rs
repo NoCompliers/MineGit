@@ -1,15 +1,9 @@
 use std::fs::{File};
-use std::io::{self, Write, Read, Seek, SeekFrom};
+use std::io::{self, Write, Read, Seek};
 use byteorder::{WriteBytesExt, ReadBytesExt, BigEndian};
 use crate::recover::diff::Insert;
 
 const HEADER_SIZE: usize = 1024 * 4 * 2;
-pub struct IntervalMapping {
-    old_idx: u64,
-    new_idx: u64,
-    len: u64
-}
-
 pub const SNAPSHOT_HEADER_SIZE: usize = 25;
 
 #[derive(Clone)]
@@ -18,8 +12,7 @@ pub struct SnapshotHeader {
     pub payload_len: u64,
     pub file_len: u64,
     pub pos: u64,
-    pub is_zipped: bool,
-    pub is_mca_file: bool
+    pub is_zipped: bool
 }
 
 impl Default for SnapshotHeader {
@@ -29,20 +22,18 @@ impl Default for SnapshotHeader {
             payload_len: 0,
             file_len: 0,
             pos: u64::MAX,
-            is_zipped: false,
-            is_mca_file: true
+            is_zipped: false
         }
     }
 }
 
 impl SnapshotHeader {
-    pub fn store_file<W: Write>(f: &mut W, data: &[u8], is_mca: bool) -> io::Result<Self> {
+    pub fn store_file<W: Write>(f: &mut W, data: &[u8]) -> io::Result<Self> {
         let snap = SnapshotHeader {
             depend_on: u64::MAX,
             payload_len: data.len() as u64,
             file_len: data.len() as u64,
             is_zipped: false,
-            is_mca_file: is_mca,
             pos: u64::MAX
         };
         snap.serialize(f)?;
@@ -54,7 +45,7 @@ impl SnapshotHeader {
         out.write_u64::<BigEndian>(self.depend_on)?;
         out.write_u64::<BigEndian>(self.payload_len)?;
         out.write_u64::<BigEndian>(self.file_len)?;
-        out.write_u8(self.is_zipped as u8 | ((self.is_mca_file as u8) << 1))?;
+        out.write_u8(self.is_zipped as u8)?;
         Ok(())
     }
 
@@ -65,46 +56,18 @@ impl SnapshotHeader {
         res.file_len = r.read_u64::<BigEndian>()?;
         let bits = r.read_u8()?;
         res.is_zipped = (bits & 1) != 0;
-        res.is_mca_file = (bits & 0x10) != 0;
         res.pos = r.stream_position()?;
         Ok(res)
     }
 
-    pub fn get_header(f: &mut File, offset: u64) -> io::Result<Vec<u8>> {
+    fn _get_header(f: &mut File, offset: u64) -> io::Result<Vec<u8>> {
         f.seek(io::SeekFrom::Start(offset))?;
         let snapheader = SnapshotHeader::deserialize(f)?;
-        if !snapheader.is_mca_file {
-            return Err(io::Error::new(io::ErrorKind::Other, "Trying to read header of not .mca file"));
-        }
         if !snapheader.is_zipped {
             f.seek(io::SeekFrom::Current(-(offset as i64)))?;
         }
         let mut data = vec![0u8; HEADER_SIZE];
         f.read_exact(&mut data)?;
-
-        Ok(vec![])
-    }
-
-    fn get_intervals_mca(&self, f: &mut File, mut ints: Vec<IntervalMapping>, buf: &mut [u8]) -> io::Result<Vec<u8>> {
-        if self.depend_on != u64::MAX {
-            return Err(io::Error::new(io::ErrorKind::Other, "Trying to get intervals of mca file for not final snapshot, this file relies on the other file"));
-        }
-
-        let header = SnapshotHeader::get_header(f, self.pos + SNAPSHOT_HEADER_SIZE as u64)?;
-        for i in &mut ints {
-            if i.old_idx >= HEADER_SIZE as u64 { break; }
-            let len = (HEADER_SIZE as u64).min(i.old_idx + i.len) - i.old_idx;
-            buf[i.new_idx as usize..(i.new_idx+len) as usize]
-                .copy_from_slice(&header[i.old_idx as usize..(i.old_idx+len) as usize]);
-            i.old_idx += len;
-            i.new_idx += len;
-            i.len -= len;
-        }
-
-        for i in ints {
-            if i.len == 0 { continue; }
-            
-        }
 
         Ok(vec![])
     }
