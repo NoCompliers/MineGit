@@ -7,101 +7,10 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'minegit'",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=minegit",
-                    "--package=MineGit"
-                ],
-                "filter": {
-                    "name": "minegit",
-                    "kind": "bin"
-                }
-            },
+            "name": "Debug",
+            "program": "${workspaceFolder}/target/debug/MineGit.exe",
             "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug commit 'minegit'",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=minegit",
-                    "--package=MineGit"
-                ],
-                "filter": {
-                    "name": "minegit",
-                    "kind": "bin"
-                }
-            },
-            "args": [
-                "commit",
-                "debug_commit"
-            ],
-            "cwd": "/home/vr/Desktop/New Folder (1)/"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug init 'minegit'",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=minegit",
-                    "--package=MineGit"
-                ],
-                "filter": {
-                    "name": "minegit",
-                    "kind": "bin"
-                }
-            },
-            "args": [
-                "init"
-            ],
-            "cwd": "/home/vr/Desktop/New Folder (1)/"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug restore 'minegit'",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=minegit",
-                    "--package=MineGit"
-                ],
-                "filter": {
-                    "name": "minegit",
-                    "kind": "bin"
-                }
-            },
-            "args": [
-                "restore",
-                "2"
-            ],
-            "cwd": "/home/vr/Desktop/New Folder (1)/"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in executable 'minegit'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--bin=minegit",
-                    "--package=MineGit"
-                ],
-                "filter": {
-                    "name": "minegit",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
         }
     ]
 }

@@ -15,7 +15,7 @@ pub fn run() {
     match args.command {
         Commands::Init => {
             println!("Init called");
-            initializer::init(&root_path).unwrap_or_else(|e| panic!("{e}"));
+            initializer::init(&root_path).unwrap_or_else(|e| println!("{e}"));
         }
         Commands::Status => {}
         Commands::Commit(args) => {

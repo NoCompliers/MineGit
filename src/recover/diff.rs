@@ -35,7 +35,7 @@ impl Copy {
 }
 
 impl Insert {
-    pub const SERIZIZED_SIZE: u64 = 8;
+    pub const SERIZIZED_SIZE: u64 = 4;
     pub fn serialize<W: Write>(data: &[u8], out: &mut W) -> io::Result<()> {
         debug_assert!(data.len() <= (u32::MAX >> 1) as usize);
         let size = ( 1u32 << 31 ) | (data.len() as u32);

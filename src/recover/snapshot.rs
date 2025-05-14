@@ -33,6 +33,7 @@ impl Default for SnapshotHeader {
 impl SnapshotHeader {
     pub const SERIZIZED_SIZE: usize = 25;
     pub fn save_new<W: Write + Seek>(f: &mut W, data: &[u8]) -> io::Result<Self> {
+        f.seek(io::SeekFrom::End(0))?;
         let snap = SnapshotHeader {
             depend_on: u64::MAX,
             payload_len: data.len() as u64 + Insert::SERIZIZED_SIZE,
@@ -42,17 +43,17 @@ impl SnapshotHeader {
         };
         snap.serialize(f)?;
         Insert::serialize(data, f)?;
-        return Ok(snap);
+        Ok(snap)
     }
 
     pub fn update<F: Read + Seek + Write>(&self, pack: &mut F, f: &[u8]) -> io::Result<Self> {
-        let data = recover(pack, self.clone(), self.file_len as usize + f.len())?;
+        let data = recover(pack, self.clone())?; // self.file_len as usize + f.len()
         let mut diff = DiffGenerator::new();
         diff.init_new(data, f)?;
         let mut diff_data: Vec<u8> = Vec::new();
         diff.generate(&mut diff_data)?;
 
-        // let diff_data = encode_all(Cursor::new(diff_data), 16).expect("Compression failed");
+        let diff_data = encode_all(Cursor::new(diff_data), 16).expect("Compression failed");
 
         pack.seek(io::SeekFrom::End(0))?;
         let snap = Self {
@@ -60,15 +61,15 @@ impl SnapshotHeader {
             payload_len: diff_data.len() as u64,
             file_len: f.len() as u64,
             pos: pack.stream_position()? + Self::SERIZIZED_SIZE as u64,
-            is_zipped: false,
+            is_zipped: true,
         };
         snap.serialize(pack)?;
         pack.write_all(&diff_data)?;
         Ok(snap)
     }
 
-    pub fn restore<R: Read + Seek>(&self, pack: &mut R, data: &mut Vec<u8>) -> io::Result<Vec<u8>> {
-        Ok(recover(pack, self.clone(), 0)?)
+    pub fn restore<R: Read + Seek>(&self, pack: &mut R) -> io::Result<Vec<u8>> {
+        Ok(recover(pack, self.clone())?)
     }
 
     pub fn serialize<W: Write>(&self, out: &mut W) -> io::Result<()> {

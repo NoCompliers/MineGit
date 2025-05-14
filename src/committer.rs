@@ -46,8 +46,7 @@ pub fn add_commit(target_path: &str, tag: &str) -> Result<(), Box<dyn std::error
         }
     }
     // Get commit id
-    let id = read_all_commits(target_path)?.len() as u32; //TODO: get just size
-
+    let id = get_commit_count(target_path)?;
     // Create commit info
     let rt = Runtime::new().unwrap();
     let commit_info = rt.block_on(create_commit_info(target_path, id, parent_id))?;
@@ -117,6 +116,33 @@ pub fn print_all_commits(target_path: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn get_commit_count(target_path: &str) -> io::Result<u32> {
+    let commits_path = get_commits_path(target_path)?;
+
+    // No commit file
+    if !fs_utils::is_path_exists(&commits_path) {
+        return Ok(0);
+    }
+
+    let file_size = fs_utils::get_file_size(commits_path)?;
+    let commit_size = std::mem::size_of::<Commit>() as u64;
+
+    Ok((file_size / commit_size) as u32)
+}
+
+fn get_commit_by_id(target_path: &str, id: u32) -> io::Result<Commit> {
+    let commits_path = get_commits_path(target_path)?;
+    let commit_size = std::mem::size_of::<Commit>() as u32;
+
+    let mut file = fs_utils::read_file(&commits_path)?;
+    file.seek(SeekFrom::Start((commit_size * id) as u64))?;
+    let mut buf = vec![0u8; commit_size as usize];
+    file.read_exact(&mut buf)?;
+    let commit: Commit = *from_bytes(&buf);
+
+    Ok(commit)
+}
+
 pub fn read_all_commits(target_path: &str) -> io::Result<Vec<Commit>> {
     let commits_path = get_commits_path(target_path)?;
 
@@ -144,11 +170,10 @@ pub fn read_all_commits(target_path: &str) -> io::Result<Vec<Commit>> {
 }
 
 pub fn restore(target_path: &str, commit_id: u32) -> Result<(), Box<dyn Error>> {
-    // Get commits
-    let commits = read_all_commits(&target_path)?;
-    let commit = commits[commit_id as usize]; // TODO: get by pos
-    let commits_info_file = fs_utils::read_file(&get_commits_info_path(target_path)?)?;
-    let commit_info = read_commit_info(&commits_info_file, commit.info_pos, commit.info_length)?;
+    // Get commit
+    let commit = get_commit_by_id(target_path, commit_id)?;
+    let commit_info_file = fs_utils::read_file(&get_commits_info_path(target_path)?)?;
+    let commit_info = read_commit_info(&commit_info_file, commit.info_pos, commit.info_length)?;
 
     // Delete unnecessary files
     let root_path = get_root_path(&target_path)?;
@@ -176,7 +201,7 @@ pub fn restore(target_path: &str, commit_id: u32) -> Result<(), Box<dyn Error>> 
         package_file.seek(io::SeekFrom::Start(file_info.1.package_pos))?;
         let snapshot = SnapshotHeader::deserialize(&mut package_file)?;
 
-        let recovered = recover(&mut package_file, snapshot.clone(), 0)?;
+        let recovered = recover(&mut package_file, snapshot.clone())?;
 
         file.write_all(&recovered)?;
     }
@@ -254,9 +279,9 @@ async fn create_commit_info(
 
     let mut parent_info: Option<CommitInfo> = None;
 
-    let commits = read_all_commits(target_path)?; //TODO: get by pos
-    if commits.len() > 0 {
-        let parent_commit = commits[parent_id as usize];
+    if get_commit_count(target_path)? > 0 {
+        //let parent_commit = commits[parent_id as usize];
+        let parent_commit = get_commit_by_id(target_path, parent_id)?;
         parent_info = Some(read_commit_info(
             &commits_info_file,
             parent_commit.info_pos,
@@ -310,13 +335,8 @@ async fn create_commit_info(
                         };
                     }
 
-                    // Load parent snapshot // TODO: it gets last, not the parent oone
+                    // Load parent snapshot
                     let mut package = fs_utils::open_to_write(&output_path, false).unwrap();
-                    print!(
-                        "{}Size: {}\n",
-                        output_path,
-                        package.metadata().unwrap().len()
-                    );
                     package
                         .seek(io::SeekFrom::Start(parent_file_info.package_pos))
                         .unwrap();

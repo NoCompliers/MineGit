@@ -13,10 +13,10 @@ mod recover {
     pub mod diff_gen;
     pub mod recover;
     pub mod snapshot;
+    mod test;
 }
 
 fn main() {
-    // test();
     env::set_var("RUST_BACKTRACE", "1");
     cli::run();
 }

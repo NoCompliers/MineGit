@@ -123,7 +123,7 @@ fn _recover<R: Read + Seek>(
     Ok(())
 }
 
-pub fn recover<R: Read + Seek>(pack: &mut R, snap: SnapshotHeader, cap: usize) -> io::Result<Vec<u8>> {
+pub fn recover<R: Read + Seek>(pack: &mut R, snap: SnapshotHeader) -> io::Result<Vec<u8>> {
     pack.seek(io::SeekFrom::Start(snap.pos))?;
     let len = snap.file_len;
     let bheap: BinaryHeap<Instruction> = BinaryHeap::from(vec![Instruction {
@@ -131,8 +131,8 @@ pub fn recover<R: Read + Seek>(pack: &mut R, snap: SnapshotHeader, cap: usize) -
         to: 0,
         len,
     }]);
-    let mut file = Vec::with_capacity(cap.max(snap.file_len as usize));
+    let mut file = Vec::with_capacity(snap.file_len as usize);
     file.resize(snap.file_len as usize, 0);
-    _recover(pack, bheap, snap, &mut file);
+    _recover(pack, bheap, snap, &mut file)?;
     Ok(file)
 }
