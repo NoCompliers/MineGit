@@ -3,6 +3,7 @@ use chrono::Local;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
+use std::path::Path;
 use zstd::{decode_all, encode_all};
 
 use crate::ignore_filter::IgnoreFilter;
@@ -39,11 +40,9 @@ pub fn add_commit(target_path: &str, tag: &str) -> Result<(), Box<dyn std::error
     match get_head(target_path) {
         Ok(value) => {
             parent_id = value;
-            println!("Head value: {}", value);
         }
-        Err(e) => {
+        Err(_) => {
             write_head(target_path, 0)?;
-            eprintln!("Failed to read head: {}", e);
         }
     }
     // Read previous commits to tie them with new one
@@ -157,8 +156,8 @@ pub fn restore(target_path: &str, commit_id: u32) -> Result<(), Box<dyn Error>> 
     // Restore files
     for file_info in commit_info.file_info {
         let origin_path = fixed_bytes_to_str(&file_info.0); //file_info.1.local_path_as_str()?;
-        let package_path =
-            fs_utils::build_path([&root_path, "data", &format!("{origin_path}.pkg")])?;
+        let package_path = get_package_path(&root_path, &origin_path)?;
+        //fs_utils::build_path([&root_path, "data", &format!("{origin_path}.pkg")])?;
 
         let mut file = fs_utils::open_to_write(&origin_path, true)?;
         let mut package_file = fs_utils::open_to_write(&package_path, false)?;
@@ -230,6 +229,61 @@ fn fixed_bytes_to_str<const N: usize>(bytes: &[u8; N]) -> String {
     String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
+fn split_files(files: Vec<String>) -> [Vec<String>; 6] {
+    let mut g1 = Vec::new(); // root except other groups
+    let mut g2 = Vec::new(); // root/region
+    let mut g3 = Vec::new(); // root/DIM1 except region
+    let mut g4 = Vec::new(); // root/DIM1/region
+    let mut g5 = Vec::new(); // root/DIM1-1 except region
+    let mut g6 = Vec::new(); // root/DIM1-1/region
+
+    let separator = std::path::MAIN_SEPARATOR;
+
+    let form2 = &format!("root{}region", separator);
+    let form3 = &format!("root{}DIM1", separator);
+    let form4 = &format!("root{}DIM1{}region", separator, separator);
+    let form5 = &format!("root{}DIM1-1", separator);
+    let form6 = &format!("root{}DIM1-1{}region", separator, separator);
+
+    for file in files {
+        // Directly check the beginning of the string
+        if file.starts_with(form2) {
+            g2.push(file);
+        } else if file.starts_with(form4) {
+            g4.push(file);
+        } else if file.starts_with(form3) {
+            g3.push(file);
+        } else if file.starts_with(form6) {
+            g6.push(file);
+        } else if file.starts_with(form5) {
+            g5.push(file);
+        } else {
+            g1.push(file);
+        }
+    }
+
+    [g1, g2, g3, g4, g5, g6]
+}
+
+fn get_package_path(root_path: &str, file_path: &str) -> io::Result<String> {
+    let separator = std::path::MAIN_SEPARATOR;
+
+    // Check the beginning of the file_path
+    if file_path.starts_with("region") {
+        return fs_utils::build_path([&root_path, "region.pkg"]);
+    } else if file_path.starts_with(&format!("DIM1{}region", separator)) {
+        return fs_utils::build_path([&root_path, "DIM1_region.pkg"]);
+    } else if file_path.starts_with("DIM1") {
+        return fs_utils::build_path([&root_path, "DIM1_data.pkg"]);
+    } else if file_path.starts_with(&format!("DIM1-1{}region", separator)) {
+        return fs_utils::build_path([&root_path, "DIM-1_region.pkg"]);
+    } else if file_path.starts_with("DIM1-1") {
+        return fs_utils::build_path([&root_path, "DIM-1_data.pkg"]);
+    } else {
+        return fs_utils::build_path([&root_path, "data.pkg"]);
+    }
+}
+
 fn create_commit_info(
     target_path: &str,
     id: u32,
@@ -259,75 +313,15 @@ fn create_commit_info(
         let hash_bytes = str_to_fixed_bytes::<256>(&fs_utils::file_hash(&origin_path)?);
 
         // Check if packageExist
-        let output_path =
-            fs_utils::build_path([&root_path, "data", &format!("{origin_path}.pkg")])?;
+        let output_path = get_package_path(&root_path, &origin_path)?;
+        //fs_utils::build_path([&root_path, "data", &format!("{origin_path}.pkg")])?;
 
-        if fs_utils::is_path_exists(&output_path) {
-            if let Some(ref parent_info) = parent_info {
-                let parent_file_info = parent_info
-                    .file_info
-                    .get(&path_bytes)
-                    .ok_or("parent_file_info is uninitialized")?;
-
-                file_infos.insert(
-                    path_bytes,
-                    FileInfo {
-                        hash: hash_bytes,
-                        package_pos: parent_file_info.package_pos,
-                    },
-                );
-
-                // Check if file have changed
-                if hash_bytes == parent_file_info.hash {
-                    continue;
-                }
-
-                // Load parent snapshot // TODO: it gets last, not the parent oone
-                let mut package = fs_utils::open_to_write(&output_path, false)?;
-                print!("{}Size: {}\n", output_path, package.metadata()?.len());
-                package.seek(io::SeekFrom::Start(parent_file_info.package_pos))?; //TODO: set parent here?
-                let parent_snapshot = SnapshotHeader::deserialize(&mut package)?;
-
-                // needs whole package and snapshot header
-                package.seek(io::SeekFrom::Start(0))?;
-                let recovered = recover(&mut package, parent_snapshot.clone())?;
-
-                let mut origin = fs_utils::open_to_write(&origin_path, false)?;
-
-                // Generate difference
-                let mut diff = DiffGenerator::new();
-                let mut diff_data: Vec<u8> = Vec::new();
-                let mut cur_data = Cursor::new(recovered);
-                diff.init(&mut cur_data, &mut origin)?;
-                diff.generate(&mut diff_data)?;
-
-                package.seek(io::SeekFrom::End(0))?;
-
-                // Save pos in package
-                file_infos
-                    .get_mut(&path_bytes)
-                    .ok_or("no file info")?
-                    .package_pos = package.stream_position()? as u64;
-
-                // Generate snapshot
-                let snapshot = SnapshotHeader {
-                    depend_on: parent_snapshot.pos - 25,
-                    payload_len: diff_data.len() as u64,
-                    file_len: origin.metadata()?.len(),
-                    pos: package.stream_position()? as u64, // useless
-                    is_zipped: false,
-                    is_mca_file: false,
-                };
-
-                // Append snapshot to package
-                snapshot.serialize(&mut package)?;
-                package.write_all(&diff_data)?;
-            } else {
-                panic!("parent_info is uninitialized");
-            }
-        } else {
+        // FIXME: cant do in one if using stable rust
+        if !fs_utils::is_path_exists(&output_path) {
             // Create new package file with original file
             let mut new_package = fs_utils::open_to_write(&output_path, false)?;
+            // Seek to the end of the file
+            new_package.seek(SeekFrom::End(0))?;
             let mut data = Vec::new();
             fs_utils::read_to_end(&origin_path, &mut data)?;
             SnapshotHeader::store_file(&mut new_package, &data, false)?; //TODO: mca?
@@ -339,7 +333,166 @@ fn create_commit_info(
                     package_pos: 0,
                 },
             );
+        } else {
+            let mut package = fs_utils::open_to_write(&output_path, false)?;
+
+            let mut parent_snapshot_pos = u64::MAX;
+            let mut origin = fs_utils::open_to_write(&origin_path, false)?;
+            let mut diff_data = Vec::new();
+            if let Some(ref parent_info) = parent_info {
+                let parent_file_info = parent_info
+                    .file_info
+                    .get(&path_bytes)
+                    .ok_or("parent_file_info is uninitialized")?;
+                file_infos.insert(
+                    path_bytes,
+                    FileInfo {
+                        hash: hash_bytes,
+                        package_pos: parent_file_info.package_pos,
+                    },
+                );
+                // Check if file have changed
+                if hash_bytes == parent_file_info.hash {
+                    continue;
+                }
+
+                // Load parent snapshot
+                print!("{}Size: {}\n", output_path, package.metadata()?.len());
+                package.seek(io::SeekFrom::Start(parent_file_info.package_pos))?;
+                let parent_snapshot = SnapshotHeader::deserialize(&mut package)?;
+                // needs whole package and snapshot header
+                package.seek(io::SeekFrom::Start(0))?;
+                let recovered = recover(&mut package, parent_snapshot.clone())?;
+
+                // Generate difference
+                let mut diff = DiffGenerator::new();
+                let mut diff_data: Vec<u8> = Vec::new();
+                let mut cur_data = Cursor::new(recovered);
+                diff.init(&mut cur_data, &mut origin)?;
+                diff.generate(&mut diff_data)?;
+                package.seek(io::SeekFrom::End(0))?;
+
+                parent_snapshot_pos = parent_snapshot.pos - 25;
+
+                // Save pos in package
+                file_infos
+                    .get_mut(&path_bytes)
+                    .ok_or("no file info")?
+                    .package_pos = package.stream_position()? as u64;
+            } else {
+                fs_utils::read_to_end(&origin_path, &mut diff_data)?;
+                package.seek(io::SeekFrom::End(0))?;
+
+                file_infos.insert(
+                    path_bytes,
+                    FileInfo {
+                        hash: hash_bytes,
+                        package_pos: package.stream_position()? as u64,
+                    },
+                );
+            }
+            // Generate snapshot
+            let snapshot = SnapshotHeader {
+                depend_on: parent_snapshot_pos,
+                payload_len: diff_data.len() as u64,
+                file_len: origin.metadata()?.len(),
+                pos: package.stream_position()? as u64, // useless
+                is_zipped: false,
+                is_mca_file: false,
+            };
+            // Append snapshot to package
+            snapshot.serialize(&mut package)?;
+            package.write_all(&diff_data)?;
         }
+        // else {
+        //     create_new_package(&output_path, &origin_path)?;
+        //     file_infos.insert(
+        //         path_bytes,
+        //         FileInfo {
+        //             hash: hash_bytes,
+        //             package_pos: 0,
+        //         },
+        //     );
+        // }
+
+        // if fs_utils::is_path_exists(&output_path) {
+        //     if let Some(ref parent_info) = parent_info {
+        //         let parent_file_info = parent_info
+        //             .file_info
+        //             .get(&path_bytes)
+        //             .ok_or("parent_file_info is uninitialized")?;
+
+        //         file_infos.insert(
+        //             path_bytes,
+        //             FileInfo {
+        //                 hash: hash_bytes,
+        //                 package_pos: parent_file_info.package_pos,
+        //             },
+        //         );
+
+        //         // Check if file have changed
+        //         if hash_bytes == parent_file_info.hash {
+        //             continue;
+        //         }
+
+        //         // Load parent snapshot
+        //         let mut package = fs_utils::open_to_write(&output_path, false)?;
+        //         print!("{}Size: {}\n", output_path, package.metadata()?.len());
+        //         package.seek(io::SeekFrom::Start(parent_file_info.package_pos))?;
+        //         let parent_snapshot = SnapshotHeader::deserialize(&mut package)?;
+
+        //         // needs whole package and snapshot header
+        //         package.seek(io::SeekFrom::Start(0))?;
+        //         let recovered = recover(&mut package, parent_snapshot.clone())?;
+
+        //         let mut origin = fs_utils::open_to_write(&origin_path, false)?;
+
+        //         // Generate difference
+        //         let mut diff = DiffGenerator::new();
+        //         let mut diff_data: Vec<u8> = Vec::new();
+        //         let mut cur_data = Cursor::new(recovered);
+        //         diff.init(&mut cur_data, &mut origin)?;
+        //         diff.generate(&mut diff_data)?;
+
+        //         package.seek(io::SeekFrom::End(0))?;
+
+        //         // Save pos in package
+        //         file_infos
+        //             .get_mut(&path_bytes)
+        //             .ok_or("no file info")?
+        //             .package_pos = package.stream_position()? as u64;
+
+        //         // Generate snapshot
+        //         let snapshot = SnapshotHeader {
+        //             depend_on: parent_snapshot.pos - 25,
+        //             payload_len: diff_data.len() as u64,
+        //             file_len: origin.metadata()?.len(),
+        //             pos: package.stream_position()? as u64, // useless
+        //             is_zipped: false,
+        //             is_mca_file: false,
+        //         };
+
+        //         // Append snapshot to package
+        //         snapshot.serialize(&mut package)?;
+        //         package.write_all(&diff_data)?;
+        //     } else {
+        //         panic!("parent_info is uninitialized");
+        //     }
+        // } else {
+        //     // Create new package file with original file
+        //     let mut new_package = fs_utils::open_to_write(&output_path, false)?;
+        //     let mut data = Vec::new();
+        //     fs_utils::read_to_end(&origin_path, &mut data)?;
+        //     SnapshotHeader::store_file(&mut new_package, &data, false)?; //TODO: mca?
+
+        //     file_infos.insert(
+        //         path_bytes,
+        //         FileInfo {
+        //             hash: hash_bytes,
+        //             package_pos: 0,
+        //         },
+        //     );
+        // }
     }
 
     Ok(CommitInfo {
@@ -347,6 +500,21 @@ fn create_commit_info(
         //file_info_length: files.len() as u32,
         file_info: file_infos,
     })
+}
+
+fn create_new_package(
+    output_path: &str,
+    origin_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Create new package file with original file
+    let mut new_package = fs_utils::open_to_write(&output_path, false)?;
+    // Seek to the end of the file
+    new_package.seek(SeekFrom::End(0))?;
+    let mut data = Vec::new();
+    fs_utils::read_to_end(&origin_path, &mut data)?;
+    SnapshotHeader::store_file(&mut new_package, &data, false)?; //TODO: mca?
+
+    Ok(())
 }
 
 fn create_commit(
