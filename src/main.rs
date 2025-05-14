@@ -1,3 +1,4 @@
+use std::env;
 use std::fs::OpenOptions;
 use std::{fs::File, io::Write};
 use std::io::{self, Read, Seek};
@@ -84,6 +85,7 @@ fn test() -> io::Result<()> {
 }
 
 fn main() {
+    env::set_var("RUST_BACKTRACE", "1");
     //test().unwrap();
     cli::run();
 }

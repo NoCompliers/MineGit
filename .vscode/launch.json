@@ -37,8 +37,11 @@
                     "kind": "bin"
                 }
             },
-            "args": ["commit", "debug_commit"],
-            "cwd": "${workspaceFolder}"
+            "args": [
+                "commit",
+                "debug_commit"
+            ],
+            "cwd": "/home/vr/Desktop/New Folder (1)/"
         },
         {
             "type": "lldb",
@@ -55,8 +58,31 @@
                     "kind": "bin"
                 }
             },
-            "args": ["init"],
-            "cwd": "${workspaceFolder}"
+            "args": [
+                "init"
+            ],
+            "cwd": "/home/vr/Desktop/New Folder (1)/"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug restore 'minegit'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=minegit",
+                    "--package=MineGit"
+                ],
+                "filter": {
+                    "name": "minegit",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "restore",
+                "2"
+            ],
+            "cwd": "/home/vr/Desktop/New Folder (1)/"
         },
         {
             "type": "lldb",

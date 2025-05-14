@@ -1,21 +1,19 @@
-use bitcode::decode;
-use bytemuck::from_bytes;
+use bytemuck::{cast_slice, from_bytes};
 use chrono::Local;
-use zstd::{decode_all, encode_all};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::error::Error;
-use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
+use zstd::{decode_all, encode_all};
 
 use crate::ignore_filter::IgnoreFilter;
 use crate::recover::diff_gen::DiffGenerator;
 use crate::recover::recover::recover;
-use crate::recover::snapshot::{self, SnapshotHeader};
-use crate::savefiles::{CommitInfo, FileInfo};
+use crate::recover::snapshot::SnapshotHeader;
+use crate::savefiles::{CommitInfo, FileInfo, HEAD_FILE_NAME};
 use crate::{
-    savefiles::{Commit, COMMITS_FILE_NAME, DIRECTORY_NAME, COMMITS_INFO_FILE_NAME},
+    savefiles::{Commit, COMMITS_FILE_NAME, COMMITS_INFO_FILE_NAME, DIRECTORY_NAME},
     utils::fs_utils,
 };
-
 
 fn get_root_path(target_path: &str) -> io::Result<String> {
     fs_utils::build_path([target_path, DIRECTORY_NAME])
@@ -24,20 +22,35 @@ fn get_root_path(target_path: &str) -> io::Result<String> {
 fn get_commits_path(target_path: &str) -> io::Result<String> {
     fs_utils::build_path([&get_root_path(target_path)?, COMMITS_FILE_NAME])
 }
+fn get_head_path(target_path: &str) -> io::Result<String> {
+    fs_utils::build_path([&get_root_path(target_path)?, HEAD_FILE_NAME])
+}
 
 fn get_commits_info_path(target_path: &str) -> io::Result<String> {
     fs_utils::build_path([&get_root_path(target_path)?, COMMITS_INFO_FILE_NAME])
 }
 
-pub fn add_commit(target_path: &str, tag: &str, parent_id: u32) -> Result<(), Box<dyn std::error::Error>> {
+pub fn add_commit(target_path: &str, tag: &str) -> Result<(), Box<dyn std::error::Error>> {
     let commits_path = get_commits_path(target_path)?;
     let commits_info_path = get_commits_info_path(target_path)?;
-    
+
+    // Get current head
+    let mut parent_id = 0;
+    match get_head(target_path) {
+        Ok(value) => {
+            parent_id = value;
+            println!("Head value: {}", value);
+        }
+        Err(e) => {
+            write_head(target_path, 0)?;
+            eprintln!("Failed to read head: {}", e);
+        }
+    }
     // Read previous commits to tie them with new one
-    let parent_id = read_all_commits(target_path)?.len() as u32; //TODO: get just size
+    let id = read_all_commits(target_path)?.len() as u32; //TODO: get just size // fallback
 
     // Create commit info
-    let commit_info = create_commit_info(target_path, parent_id)?;
+    let commit_info = create_commit_info(target_path, id, parent_id)?;
     let commit_info_bytes = fs_utils::encode_to_bytes(&commit_info);
 
     // Compress using zstd
@@ -45,23 +58,51 @@ pub fn add_commit(target_path: &str, tag: &str, parent_id: u32) -> Result<(), Bo
 
     // append commit info file
     let (_, commit_info_pos) = fs_utils::append_file(&commits_info_path, &compressed_commit_info)?;
-    
+
     // Create commit
-    let commit = create_commit( tag,parent_id + 1, parent_id, commit_info_pos, compressed_commit_info.len())?;
+    let commit = create_commit(
+        tag,
+        id,
+        parent_id,
+        commit_info_pos,
+        compressed_commit_info.len(),
+    )?;
     let commit_bytes = bytemuck::bytes_of(&commit);
-    fs_utils::append_file(&commits_path, &commit_bytes)?;    
-    
+    fs_utils::append_file(&commits_path, &commit_bytes)?;
+
+    write_head(target_path, id)?;
     Ok(())
 }
 
-pub fn print_all_commits(target_path: &str) -> Result<(), Box<dyn Error>>{
+pub fn get_head(target_path: &str) -> Result<u32, Box<dyn Error>> {
+    let mut head_file = fs_utils::read_file(&get_head_path(target_path)?)?;
+    let mut buffer = [0u8; 4];
+
+    head_file.read_exact(&mut buffer)?;
+    let num = bytemuck::cast_slice::<u8, u32>(&buffer)[0];
+    Ok(num)
+}
+
+pub fn write_head(target_path: &str, value: u32) -> Result<(), Box<dyn Error>> {
+    let mut file = fs_utils::open_to_write(&get_head_path(target_path)?, true)?;
+    let arr = [value];
+    let bytes = cast_slice::<u32, u8>(&arr);
+    file.write_all(bytes)?;
+    Ok(())
+}
+
+pub fn print_all_commits(target_path: &str) -> Result<(), Box<dyn Error>> {
     // Get commits
-    let commits_info_file = fs_utils::read_file(&get_commits_info_path(target_path)?)?;
-    let commits = read_all_commits(&target_path)?;
-    
-    for commit in commits {
-        println!("{}\n{}", commit, read_commit_info(&commits_info_file, commit.info_pos, commit.info_length)?);
-    }
+    // let commits_info_file = fs_utils::read_file(&get_commits_info_path(target_path)?)?;
+    // let commits = read_all_commits(&target_path)?;
+
+    // for commit in commits {
+    //     println!(
+    //         "{}\n{}",
+    //         commit,
+    //         read_commit_info(&commits_info_file, commit.info_pos, commit.info_length)?
+    //     );
+    // }
 
     Ok(())
 }
@@ -72,8 +113,7 @@ pub fn read_all_commits(target_path: &str) -> io::Result<Vec<Commit>> {
     let mut commits = Vec::new();
 
     // No commit file
-    if !fs_utils::is_path_exists(&commits_path)
-    {
+    if !fs_utils::is_path_exists(&commits_path) {
         return Ok(commits);
     }
 
@@ -96,43 +136,34 @@ pub fn read_all_commits(target_path: &str) -> io::Result<Vec<Commit>> {
 pub fn restore(target_path: &str, commit_id: u32) -> Result<(), Box<dyn Error>> {
     // Get commits
     let commits = read_all_commits(&target_path)?;
+    let commit = commits[commit_id as usize]; // TODO: get by pos
     let commits_info_file = fs_utils::read_file(&get_commits_info_path(target_path)?)?;
+    let commit_info = read_commit_info(&commits_info_file, commit.info_pos, commit.info_length)?;
 
-    // Get all changed files
-    let mut changed_files = HashMap::new();
-    for commit in commits.iter().rev() {
-        let commit_info = read_commit_info(&commits_info_file, commit.info_pos, commit.info_length)?;
-
-        for file_info in commit_info.file_info
+    // Delete unnecessary files
+    let root_path = get_root_path(&target_path)?;
+    let file_paths = get_not_ignored_files_in_directory(&target_path)?;
+    for entry in file_paths {
+        if !commit_info
+            .file_info
+            .contains_key(&str_to_fixed_bytes::<128>(&entry))
         {
-            let file_path = file_info.local_path_as_str()?;
-            if file_info.package_pos == 0 && commit.id != commit_id {
-                if fs_utils::is_path_exists(file_path) {
-                    fs_utils::remove_file(file_path)?;
-                }
-                changed_files.remove(file_path);
-            } else {
-                changed_files.insert(file_path.to_owned(), (file_info.package_pos, file_info.hash));
+            if fs_utils::is_path_exists(&entry) {
+                fs_utils::remove_file(&entry)?; // TODO: just ignore error
             }
-        }
-
-        if commit.id == commit_id {
-            break;
         }
     }
 
-    let root_path= get_root_path(&target_path)?;
-
     // Restore files
-    for changed_file in changed_files
-    {
-        let origin_path = changed_file.0;
-        let package_path = fs_utils::build_path([&root_path, "data", &format!("{origin_path}.pkg")])?;
+    for file_info in commit_info.file_info {
+        let origin_path = fixed_bytes_to_str(&file_info.0); //file_info.1.local_path_as_str()?;
+        let package_path =
+            fs_utils::build_path([&root_path, "data", &format!("{origin_path}.pkg")])?;
 
         let mut file = fs_utils::open_to_write(&origin_path, true)?;
         let mut package_file = fs_utils::open_to_write(&package_path, false)?;
 
-        package_file.seek(io::SeekFrom::Start(changed_file.1.0))?;
+        package_file.seek(io::SeekFrom::Start(file_info.1.package_pos))?;
         let snapshot = SnapshotHeader::deserialize(&mut package_file)?;
 
         let recovered = recover(&mut package_file, snapshot.clone())?;
@@ -140,11 +171,16 @@ pub fn restore(target_path: &str, commit_id: u32) -> Result<(), Box<dyn Error>> 
         file.write_all(&recovered)?;
     }
 
+    write_head(target_path, commit_id)?;
 
     Ok(())
 }
 
-pub fn read_commit_info<R: Read + Seek>(mut reader: R, pos: u64, len: usize) -> Result<CommitInfo, Box<dyn Error>> {
+pub fn read_commit_info<R: Read + Seek>(
+    mut reader: R,
+    pos: u64,
+    len: usize,
+) -> Result<CommitInfo, Box<dyn Error>> {
     reader.seek(SeekFrom::Start(pos))?;
 
     let mut compressed_buffer = vec![0u8; len as usize];
@@ -156,17 +192,15 @@ pub fn read_commit_info<R: Read + Seek>(mut reader: R, pos: u64, len: usize) -> 
     Ok(commit_info)
 }
 
-fn create_commit_info(target_path: &str, id: u32)-> Result<CommitInfo, Box<dyn Error>>
-{
-    let root_path= get_root_path(&target_path)?;
-    let commits_info_file = fs_utils::open_to_write(&get_commits_info_path(target_path)?, false)?;
-
+fn get_not_ignored_files_in_directory(target_path: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    let root_path = get_root_path(&target_path)?;
     let entries = fs_utils::get_all_files_in_directory(&target_path)?;
 
     let mut file_paths = Vec::new();
 
     let filter = IgnoreFilter::new(&root_path);
 
+    // Get all files in directory
     for entry in entries {
         let full_path = entry.path();
         let path = full_path.strip_prefix(target_path)?;
@@ -180,59 +214,84 @@ fn create_commit_info(target_path: &str, id: u32)-> Result<CommitInfo, Box<dyn E
         file_paths.push(path_string); // clone the relative path into owned PathBuf
     }
 
-    let mut file_infos = Vec::new();
+    Ok(file_paths)
+}
+
+fn str_to_fixed_bytes<const N: usize>(s: &str) -> [u8; N] {
+    let as_bytes = s.as_bytes();
+    let mut bytes = [0u8; N];
+    let len = as_bytes.len().min(N);
+    bytes[..len].copy_from_slice(&as_bytes[..len]);
+    bytes
+}
+
+fn fixed_bytes_to_str<const N: usize>(bytes: &[u8; N]) -> String {
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(N);
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
+}
+
+fn create_commit_info(
+    target_path: &str,
+    id: u32,
+    parent_id: u32,
+) -> Result<CommitInfo, Box<dyn Error>> {
+    let root_path = get_root_path(&target_path)?;
+    let commits_info_file = fs_utils::open_to_write(&get_commits_info_path(target_path)?, false)?;
+
+    let file_paths = get_not_ignored_files_in_directory(&target_path)?;
+
+    let mut file_infos = HashMap::new();
+
+    let mut parent_info: Option<CommitInfo> = None;
+
+    let commits = read_all_commits(target_path)?; //TODO: get by pos
+    if commits.len() > 0 {
+        let parent_commit = commits[parent_id as usize];
+        parent_info = Some(read_commit_info(
+            &commits_info_file,
+            parent_commit.info_pos,
+            parent_commit.info_length,
+        )?);
+    }
 
     for origin_path in file_paths {
-        let path = origin_path.as_bytes();
-        let mut path_bytes = [0u8; 128];
-        path_bytes[..path.len()].copy_from_slice(path);
-        
-        let hash = fs_utils::file_hash(&origin_path)?;
-        let mut hash_bytes = [0u8;256];
-        hash_bytes[..hash.len()].copy_from_slice(hash.as_bytes());
-
+        let path_bytes = str_to_fixed_bytes::<128>(&origin_path);
+        let hash_bytes = str_to_fixed_bytes::<256>(&fs_utils::file_hash(&origin_path)?);
 
         // Check if packageExist
-        let output_path = fs_utils::build_path([&root_path, "data", &format!("{origin_path}.pkg")])?;
-        let mut package_pos = 0;
+        let output_path =
+            fs_utils::build_path([&root_path, "data", &format!("{origin_path}.pkg")])?;
 
-        // Check from commits instead
         if fs_utils::is_path_exists(&output_path) {
-            let commits = read_all_commits(&target_path)?;
+            if let Some(ref parent_info) = parent_info {
+                let parent_file_info = parent_info
+                    .file_info
+                    .get(&path_bytes)
+                    .ok_or("parent_file_info is uninitialized")?;
 
-            let mut parent_info: Option<FileInfo> = None;
+                file_infos.insert(
+                    path_bytes,
+                    FileInfo {
+                        hash: hash_bytes,
+                        package_pos: parent_file_info.package_pos,
+                    },
+                );
 
-            'outer: for commit in commits.iter().rev() {
-                let commit_info = read_commit_info(&commits_info_file, commit.info_pos, commit.info_length)?;
-
-                // TODO: indexing
-                for commit_info_file in commit_info.file_info {
-                    if commit_info_file.local_path == path_bytes {
-                        parent_info = Some(commit_info_file);
-                        break 'outer;
-                    }
-                }
-            }
-
-            
-            if let Some(info) = parent_info {
                 // Check if file have changed
-                if hash_bytes == info.hash {
+                if hash_bytes == parent_file_info.hash {
                     continue;
                 }
 
-
-                // Load parent snapshot
+                // Load parent snapshot // TODO: it gets last, not the parent oone
                 let mut package = fs_utils::open_to_write(&output_path, false)?;
-                print!("{}Size: {}\n",output_path, package.metadata()?.len());
-                package.seek(io::SeekFrom::Start(info.package_pos))?;
+                print!("{}Size: {}\n", output_path, package.metadata()?.len());
+                package.seek(io::SeekFrom::Start(parent_file_info.package_pos))?; //TODO: set parent here?
                 let parent_snapshot = SnapshotHeader::deserialize(&mut package)?;
-                
-                
+
                 // needs whole package and snapshot header
                 package.seek(io::SeekFrom::Start(0))?;
                 let recovered = recover(&mut package, parent_snapshot.clone())?;
-                
+
                 let mut origin = fs_utils::open_to_write(&origin_path, false)?;
 
                 // Generate difference
@@ -241,13 +300,14 @@ fn create_commit_info(target_path: &str, id: u32)-> Result<CommitInfo, Box<dyn E
                 let mut cur_data = Cursor::new(recovered);
                 diff.init(&mut cur_data, &mut origin)?;
                 diff.generate(&mut diff_data)?;
-                
-                
-                
+
                 package.seek(io::SeekFrom::End(0))?;
-                
+
                 // Save pos in package
-                package_pos = package.stream_position()? as u64;
+                file_infos
+                    .get_mut(&path_bytes)
+                    .ok_or("no file info")?
+                    .package_pos = package.stream_position()? as u64;
 
                 // Generate snapshot
                 let snapshot = SnapshotHeader {
@@ -256,15 +316,14 @@ fn create_commit_info(target_path: &str, id: u32)-> Result<CommitInfo, Box<dyn E
                     file_len: origin.metadata()?.len(),
                     pos: package.stream_position()? as u64, // useless
                     is_zipped: false,
-                    is_mca_file: false
+                    is_mca_file: false,
                 };
-                
+
                 // Append snapshot to package
                 snapshot.serialize(&mut package)?;
                 package.write_all(&diff_data)?;
-                
-            } else  {
-                panic!("parent_info is uninitialized! : {}", output_path);
+            } else {
+                panic!("parent_info is uninitialized");
             }
         } else {
             // Create new package file with original file
@@ -272,24 +331,30 @@ fn create_commit_info(target_path: &str, id: u32)-> Result<CommitInfo, Box<dyn E
             let mut data = Vec::new();
             fs_utils::read_to_end(&origin_path, &mut data)?;
             SnapshotHeader::store_file(&mut new_package, &data, false)?; //TODO: mca?
+
+            file_infos.insert(
+                path_bytes,
+                FileInfo {
+                    hash: hash_bytes,
+                    package_pos: 0,
+                },
+            );
         }
-        file_infos.push(FileInfo { local_path: path_bytes, hash: hash_bytes, package_pos });
     }
 
-    Ok(CommitInfo{
+    Ok(CommitInfo {
         id,
         //file_info_length: files.len() as u32,
-        file_info: file_infos
+        file_info: file_infos,
     })
 }
-
 
 fn create_commit(
     tag: &str,
     id: u32,
     parent_id: u32,
     info_pos: u64,
-    info_length: usize
+    info_length: usize,
 ) -> Result<Commit, Box<dyn Error>> {
     let mut tag_bytes = [0u8; 256];
 
@@ -298,13 +363,12 @@ fn create_commit(
     let len = truncated.len().min(256);
     tag_bytes[..len].copy_from_slice(&truncated[..len]);
 
-
     Ok(Commit {
         id: id,
         timestamp: Local::now().timestamp(),
         tag: tag_bytes,
         parent_id,
         info_pos,
-        info_length
+        info_length,
     })
 }

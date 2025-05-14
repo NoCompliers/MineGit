@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use bitcode::{Decode, Encode};
 use bytemuck::{Pod, Zeroable};
@@ -6,6 +6,7 @@ use chrono::DateTime;
 
 pub const DIRECTORY_NAME: &str = ".minegit";
 pub const COMMITS_FILE_NAME: &str = "commits.byte";
+pub const HEAD_FILE_NAME: &str = "head.byte";
 pub const COMMITS_INFO_FILE_NAME: &str = "commits_info.bitcode";
 pub const IGNORE_FILE_NAME: &str = "ignore";
 
@@ -16,7 +17,7 @@ pub struct Commit {
     pub timestamp: i64,
     pub parent_id: u32,
     pub info_pos: u64,
-    pub info_length: usize,    
+    pub info_length: usize,
 }
 unsafe impl Pod for Commit {}
 unsafe impl Zeroable for Commit {}
@@ -31,8 +32,7 @@ impl fmt::Display for Commit {
 
         // Convert timestamp to readable date (assuming seconds)
         let datetime = DateTime::from_timestamp(self.timestamp, 0)
-        .unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap());
-    
+            .unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap());
 
         write!(
             f,
@@ -51,66 +51,76 @@ impl fmt::Display for Commit {
 impl Commit {
     pub fn tag_as_str(&self) -> Result<&str, std::str::Utf8Error> {
         // Find the first null (0) byte — if you store C-style null-terminated strings
-        let end = self.tag.iter().position(|&b| b == 0).unwrap_or(self.tag.len());
+        let end = self
+            .tag
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.tag.len());
         std::str::from_utf8(&self.tag[..end])
     }
 }
 
-
 #[derive(Debug, Encode, Decode)]
 pub struct CommitInfo {
     pub id: u32,
-    pub file_info: Vec<FileInfo>
+    pub file_info: HashMap<[u8; 128], FileInfo>,
 }
 
-impl fmt::Display for CommitInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "CommitInfo {{ id: {} }}", self.id)?;
-        writeln!(f, "FileInfos ({} items):", self.file_info.len())?;
+// impl fmt::Display for CommitInfo {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         writeln!(f, "CommitInfo {{ id: {} }}", self.id)?;
+//         writeln!(f, "FileInfos ({} items):", self.file_info.len())?;
 
-        for (i, fi) in self.file_info.iter().enumerate() {
-            writeln!(f, "  [{}] {}", i, fi)?;
-        }
+//         for (i, fi) in self.file_info.iter().enumerate() {
+//             writeln!(f, "  [{}] {}", i, fi.1)?;
+//         }
 
-        Ok(())
-    }
-}
+//         Ok(())
+//     }
+// }
 
 #[derive(Debug, Encode, Decode)]
 pub struct FileInfo {
-    pub local_path: [u8; 128],
     pub hash: [u8; 256],
-    pub package_pos: u64
+    pub package_pos: u64,
 }
 
-impl fmt::Display for FileInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let local_path = match self.local_path_as_str() {
-            Ok(s) => s,
-            Err(_) => "<invalid UTF-8>",
-        };
+// impl fmt::Display for FileInfo {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         let local_path = match self.local_path_as_str() {
+//             Ok(s) => s,
+//             Err(_) => "<invalid UTF-8>",
+//         };
 
-        let hash = match self.hash_as_str() {
-            Ok(s) => s,
-            Err(_) => "<invalid UTF-8>",
-        };
+//         let hash = match self.hash_as_str() {
+//             Ok(s) => s,
+//             Err(_) => "<invalid UTF-8>",
+//         };
 
-        write!(
-            f,
-            "FileInfo {{ local_path: \"{}\", hash: \"{}\", package_pos: {} }}",
-            local_path, hash, self.package_pos
-        )
-    }
-}
+//         write!(
+//             f,
+//             "FileInfo {{ local_path: \"{}\", hash: \"{}\", package_pos: {} }}",
+//             local_path, hash, self.package_pos
+//         )
+//     }
+// }
 
-impl FileInfo {
-    pub fn local_path_as_str(&self) -> Result<&str, std::str::Utf8Error> {
-        let end = self.local_path.iter().position(|&b| b == 0).unwrap_or(self.local_path.len());
-        std::str::from_utf8(&self.local_path[..end])
-    }
+// impl FileInfo {
+//     pub fn local_path_as_str(&self) -> Result<&str, std::str::Utf8Error> {
+//         let end = self
+//             .local_path
+//             .iter()
+//             .position(|&b| b == 0)
+//             .unwrap_or(self.local_path.len());
+//         std::str::from_utf8(&self.local_path[..end])
+//     }
 
-    pub fn hash_as_str(&self) -> Result<&str, std::str::Utf8Error> {
-        let end = self.hash.iter().position(|&b| b == 0).unwrap_or(self.hash.len());
-        std::str::from_utf8(&self.hash[..end])
-    }
-}
+//     pub fn hash_as_str(&self) -> Result<&str, std::str::Utf8Error> {
+//         let end = self
+//             .hash
+//             .iter()
+//             .position(|&b| b == 0)
+//             .unwrap_or(self.hash.len());
+//         std::str::from_utf8(&self.hash[..end])
+//     }
+// }
