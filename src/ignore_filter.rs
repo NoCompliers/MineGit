@@ -13,7 +13,9 @@ pub struct IgnoreFilter {
 impl IgnoreFilter {
     // Constructor to create a new IgnoreFilter from a list of patterns
     pub fn new(root_path: &str) -> Self {
-        let mut file = fs_utils::read_file(&format!("{root_path}/{IGNORE_FILE_NAME}")).unwrap();
+        let separator = std::path::MAIN_SEPARATOR;
+        let mut file =
+            fs_utils::read_file(&format!("{root_path}{separator}{IGNORE_FILE_NAME}")).unwrap();
 
         let mut content = String::new();
         file.read_to_string(&mut content).unwrap();

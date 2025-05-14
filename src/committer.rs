@@ -8,9 +8,8 @@ use tokio::runtime::Runtime;
 use zstd::{decode_all, encode_all};
 
 use crate::ignore_filter::IgnoreFilter;
-use crate::recover::diff_gen::DiffGenerator;
 use crate::recover::recover::recover;
-use crate::recover::snapshot::{SnapshotHeader, SNAPSHOT_HEADER_SIZE};
+use crate::recover::snapshot::SnapshotHeader;
 use crate::savefiles::{CommitInfo, FileInfo, HEAD_FILE_NAME};
 use crate::{
     savefiles::{Commit, COMMITS_FILE_NAME, COMMITS_INFO_FILE_NAME, DIRECTORY_NAME},
@@ -177,7 +176,7 @@ pub fn restore(target_path: &str, commit_id: u32) -> Result<(), Box<dyn Error>> 
         package_file.seek(io::SeekFrom::Start(file_info.1.package_pos))?;
         let snapshot = SnapshotHeader::deserialize(&mut package_file)?;
 
-        let recovered = recover(&mut package_file, snapshot.clone())?;
+        let recovered = recover(&mut package_file, snapshot.clone(), 0)?;
 
         file.write_all(&recovered)?;
     }
@@ -323,41 +322,16 @@ async fn create_commit_info(
                         .unwrap();
                     let parent_snapshot = SnapshotHeader::deserialize(&mut package).unwrap();
 
-                    // needs whole package and snapshot header
-                    package.seek(io::SeekFrom::Start(0)).unwrap();
-                    let recovered = recover(&mut package, parent_snapshot.clone()).unwrap();
-
                     let mut origin = fs_utils::open_to_write(&origin_path, false).unwrap();
-
-                    // Generate difference
-                    let mut diff = DiffGenerator::new();
-                    let mut diff_data: Vec<u8> = Vec::new();
-                    let mut cur_data = Cursor::new(recovered);
-                    diff.init(&mut cur_data, &mut origin).unwrap();
-                    diff.generate(&mut diff_data).unwrap();
-
-                    package.seek(io::SeekFrom::End(0)).unwrap();
-
-                    let pkg_pos = package.stream_position().unwrap() as u64;
-
-                    // Generate snapshot
-                    let snapshot = SnapshotHeader {
-                        depend_on: parent_snapshot.pos - SNAPSHOT_HEADER_SIZE as u64,
-                        payload_len: diff_data.len() as u64,
-                        file_len: origin.metadata().unwrap().len(),
-                        pos: package.stream_position().unwrap() as u64, // useless
-                        is_zipped: false,
-                    };
-
-                    // Append snapshot to package
-                    snapshot.serialize(&mut package).unwrap();
-                    package.write_all(&diff_data).unwrap();
+                    let mut origin_data: Vec<u8> = Vec::new();
+                    origin.read_to_end(&mut origin_data).unwrap();
+                    let new_snap = parent_snapshot.update(&mut package, &origin_data).unwrap();
 
                     return Res {
                         k: path_bytes,
                         v: FileInfo {
                             hash: hash_bytes,
-                            package_pos: pkg_pos,
+                            package_pos: new_snap.pos - SnapshotHeader::SERIZIZED_SIZE as u64,
                         },
                     };
                 } else {
@@ -368,7 +342,7 @@ async fn create_commit_info(
                 let mut new_package = fs_utils::open_to_write(&output_path, false).unwrap();
                 let mut data = Vec::new();
                 fs_utils::read_to_end(&origin_path, &mut data).unwrap();
-                SnapshotHeader::store_file(&mut new_package, &data).unwrap(); //TODO: mca?
+                SnapshotHeader::save_new(&mut new_package, &data).unwrap();
 
                 return Res {
                     k: path_bytes,

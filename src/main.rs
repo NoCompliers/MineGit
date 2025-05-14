@@ -16,6 +16,7 @@ mod recover {
 }
 
 fn main() {
-    env::set_var("RUST_BACKTRACE", "full");
+    // test();
+    env::set_var("RUST_BACKTRACE", "1");
     cli::run();
 }

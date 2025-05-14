@@ -1,10 +1,9 @@
-use crate::recover::diff::{read_command_header, DiffCommandHeader};
-use crate::recover::snapshot::SnapshotHeader;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::fs::File;
-use std::io::{self, Read, Seek};
-use std::time::Instant;
+use std::io::{self, Cursor, Read, Seek};
+use zstd::Decoder;
+use crate::recover::diff::DiffCommandHeader;
+use crate::recover::snapshot::SnapshotHeader;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Instruction {
@@ -25,30 +24,45 @@ impl PartialOrd for Instruction {
     }
 }
 
-fn _recover(
-    pack: &mut File,
+fn init_data<R: Read>(pack: &mut R, snap: &SnapshotHeader, buf: &mut Vec<u8>, res: &mut Vec<u8>) -> io::Result<()> {
+    if snap.is_zipped {
+        buf.resize(snap.payload_len as usize, 0);
+        pack.read_exact(buf)?;
+        let mut decoder = Decoder::new(Cursor::new(&buf))?;
+        decoder.read_to_end(res)?;
+    } else {
+        res.resize(snap.payload_len as usize, 0);
+        pack.read_exact(res)?;
+    }
+    Ok(())
+}
+
+fn _recover<R: Read + Seek>(
+    pack: &mut R,
     mut ops: BinaryHeap<Instruction>,
     mut snap: SnapshotHeader,
-    size: u64,
-) -> io::Result<Vec<u8>> {
-    let mut file = vec![0u8; size as usize];
+    file: &mut [u8]
+) -> io::Result<()> {
     let mut next: Vec<Instruction> = Vec::new();
     let mut buf: Vec<u8> = Vec::new();
+    let mut buf_temp: Vec<u8> = Vec::new();
+    pack.seek(io::SeekFrom::Start(snap.pos))?;
 
-    loop {
+    while !ops.is_empty() {
         let mut idx: u64 = 0;
+        init_data(pack, &snap, &mut buf_temp, &mut buf)?;
+        let mut buf_cursor = Cursor::new(&buf);
         while !ops.is_empty() {
             if ops.peek().unwrap().len == 0 {
                 ops.pop();
                 continue;
             }
-            let (op_head, _) = read_command_header(pack).unwrap();
+
+            let (op_head, _) = DiffCommandHeader::deserialize(&mut buf_cursor).unwrap();
             match op_head {
                 DiffCommandHeader::Copy(c) => {
                     while let Some(op) = ops.peek() {
-                        if idx + c.len <= op.from {
-                            break;
-                        }
+                        if idx + c.len <= op.from { break; }
                         let op = ops.pop().unwrap();
                         let skip = op.from - idx;
                         let len = op.len.min((c.len).saturating_sub(skip));
@@ -59,9 +73,7 @@ fn _recover(
                             to: op.to,
                         });
 
-                        if op.len == len {
-                            continue;
-                        }
+                        if op.len == len { continue; }
                         ops.push(Instruction {
                             from: op.from + len,
                             to: op.to + len,
@@ -71,27 +83,18 @@ fn _recover(
                     idx += c.len;
                 }
                 DiffCommandHeader::Insert(ins) => {
-                    buf.clear();
                     while let Some(op) = ops.peek() {
-                        if idx + ins.len <= op.from {
-                            break;
-                        }
+                        if idx + ins.len <= op.from { break; }
                         let op = ops.pop().unwrap();
 
                         let skip = op.from - idx;
                         let len = op.len.min(ins.len.saturating_sub(skip));
-                        if (buf.len() as u64) < skip + len {
-                            let l = buf.len();
-                            buf.resize((skip + len) as usize, 0);
-                            pack.read(&mut buf[l..])?;
-                        }
+                        let f_idx = (buf_cursor.position() + skip) as usize;
 
                         file[(op.to as usize)..((op.to + len) as usize)]
-                            .copy_from_slice(&buf[skip as usize..(skip + len) as usize]);
+                            .copy_from_slice(&buf[f_idx..(f_idx + len as usize)]);
 
-                        if len == op.len {
-                            continue;
-                        }
+                        if len == op.len { continue; }
                         ops.push(Instruction {
                             from: op.from + len,
                             to: op.to + len,
@@ -100,7 +103,7 @@ fn _recover(
                     }
 
                     idx += ins.len;
-                    pack.seek(io::SeekFrom::Current(ins.len as i64 - buf.len() as i64))?;
+                    buf_cursor.seek(io::SeekFrom::Current(ins.len as i64))?;
                 }
             }
         }
@@ -117,10 +120,10 @@ fn _recover(
         snap = SnapshotHeader::deserialize(pack)?;
     }
 
-    Ok(file)
+    Ok(())
 }
 
-pub fn recover(pack: &mut File, snap: SnapshotHeader) -> io::Result<Vec<u8>> {
+pub fn recover<R: Read + Seek>(pack: &mut R, snap: SnapshotHeader, cap: usize) -> io::Result<Vec<u8>> {
     pack.seek(io::SeekFrom::Start(snap.pos))?;
     let len = snap.file_len;
     let bheap: BinaryHeap<Instruction> = BinaryHeap::from(vec![Instruction {
@@ -128,194 +131,8 @@ pub fn recover(pack: &mut File, snap: SnapshotHeader) -> io::Result<Vec<u8>> {
         to: 0,
         len,
     }]);
-    return _recover(pack, bheap, snap, len);
-}
-
-pub fn _recover_test(files: Vec<&mut File>, last_file: &mut File, size: u64) -> io::Result<Vec<u8>> {
-    let mut buf = vec![0u8; size as usize];
-    let mut ops = BinaryHeap::from([Instruction {
-        from: 0,
-        to: 0,
-        len: size,
-    }]);
-
-    let mut next: Vec<Instruction> = Vec::new();
-
-    for f in files {
-        let mut idx: u64 = 0;
-        while let Some(op) = ops.peek() {
-            let (op_head, red) = read_command_header(f).unwrap();
-            match op_head {
-                DiffCommandHeader::Copy(c) => {
-                    if idx + c.len <= op.from {
-                        idx += c.len;
-                        debug_assert!(idx <= op.from);
-                        continue;
-                    }
-                    let op = ops.pop().unwrap();
-                    let skip = op.from - idx; // add separate failure return
-                    let len = op.len.min((c.len).saturating_sub(skip));
-                    let from = c.sidx + skip;
-                    next.push(Instruction {
-                        from,
-                        len,
-                        to: op.to,
-                    });
-
-                    f.seek(io::SeekFrom::Current(-(red as i64)))?;
-                    if op.len == len {
-                        continue;
-                    }
-                    ops.push(Instruction {
-                        from: op.from + len,
-                        to: op.to + len,
-                        len: op.len - len,
-                    });
-                }
-                DiffCommandHeader::Insert(ins) => {
-                    if idx + ins.len <= op.from {
-                        idx += ins.len;
-                        debug_assert!(idx <= op.from);
-                        f.seek(io::SeekFrom::Current(ins.len as i64))?;
-                        continue;
-                    }
-                    let op = ops.pop().unwrap();
-
-                    let skip = op.from - idx;
-                    let len = op.len.min(ins.len.saturating_sub(skip));
-
-                    f.seek(io::SeekFrom::Current(skip as i64))?;
-                    f.read_exact(&mut buf[(op.to as usize)..((op.to + len) as usize)])
-                        .unwrap();
-                    f.seek(io::SeekFrom::Current(-((red + skip + len) as i64)))?;
-
-                    if len == op.len {
-                        continue;
-                    }
-                    ops.push(Instruction {
-                        from: op.from + len,
-                        to: op.to + len,
-                        len: op.len - len,
-                    });
-                }
-            }
-        }
-
-        let temp = ops.into_vec();
-        ops = BinaryHeap::from(next);
-        next = temp;
-        next.clear();
-    }
-
-    while let Some(op) = ops.pop() {
-        last_file.seek(io::SeekFrom::Start(op.from))?;
-        last_file.read_exact(&mut buf[(op.to as usize)..((op.to + op.len) as usize)])?;
-    }
-
-    Ok(buf)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::recover::diff_gen::DiffGenerator;
-    use std::fs::OpenOptions;
-
-    fn cmp_files(fa: &mut File, fb: &mut File) -> io::Result<bool> {
-        fa.seek(io::SeekFrom::Start(0))?;
-        fb.seek(io::SeekFrom::Start(0))?;
-
-        let mut fa_data = Vec::new();
-        let mut fb_data = Vec::new();
-
-        fa.read_to_end(&mut fa_data)?;
-        fb.read_to_end(&mut fb_data)?;
-
-        Ok(fa_data == fb_data)
-    }
-
-    fn test_files_recover(mut files: Vec<File>) -> bool {
-        let mut diffs: Vec<File> = Vec::new();
-        let mut diff_gen = DiffGenerator::new();
-        for i in 1..files.len() {
-            let (head, tail) = files.split_at_mut(i);
-            head[i - 1].seek(io::SeekFrom::Start(0)).unwrap();
-            let mut out = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(format!(
-                    "D:\\projects\\MineGitFork\\test_files\\recover\\generated\\out{}.txt",
-                    i
-                ))
-                .unwrap();
-
-            diff_gen.init(&mut head[i - 1], &mut tail[0]).unwrap();
-            diff_gen.generate(&mut out).unwrap();
-            diffs.push(out);
-        }
-
-        diffs.reverse();
-        let size = files.last().unwrap().metadata().unwrap().len();
-
-        let mut _diffs: Vec<&mut File> = Vec::new();
-        for f in &mut diffs {
-            f.seek(io::SeekFrom::Start(0)).unwrap();
-            _diffs.push(f);
-        }
-        files.last().unwrap().seek(io::SeekFrom::Start(0)).unwrap();
-
-        let data = _recover_test(_diffs, &mut files[0], size).unwrap();
-        let mut recovered = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open("D:\\projects\\MineGitFork\\test_files\\recover\\generated\\recovered.txt")
-            .unwrap();
-
-        true
-    }
-
-    #[test]
-    fn tr1() {
-        let files = vec![
-            File::open("D:\\projects\\MineGitFork\\test_files\\recover\\regions\\r.0.0.mca")
-                .unwrap(),
-            File::open("D:\\projects\\MineGitFork\\test_files\\recover\\regions\\r.0.1.mca")
-                .unwrap(),
-            File::open("D:\\projects\\MineGitFork\\test_files\\recover\\regions\\r.0.2.mca")
-                .unwrap(),
-        ];
-
-        assert_eq!(test_files_recover(files), true);
-    }
-
-    // #[test]
-    fn t1() {
-        let files = vec![
-            File::open("D:\\projects\\MineGitFork\\test_files\\recover\\textfs\\fileA.txt")
-                .unwrap(),
-            File::open("D:\\projects\\MineGitFork\\test_files\\recover\\textfs\\fileB.txt")
-                .unwrap(),
-            File::open("D:\\projects\\MineGitFork\\test_files\\recover\\textfs\\fileC.txt")
-                .unwrap(),
-            File::open("D:\\projects\\MineGitFork\\test_files\\recover\\textfs\\fileD.txt")
-                .unwrap(),
-            File::open("D:\\projects\\MineGitFork\\test_files\\recover\\textfs\\fileE.txt")
-                .unwrap(),
-            File::open("D:\\projects\\MineGitFork\\test_files\\recover\\textfs\\fileF.txt")
-                .unwrap(),
-            // File::open("D:\\projects\\MineGitFork\\test_files\\recover\\fileG.txt").unwrap(),
-        ];
-        assert_eq!(test_files_recover(files), true);
-
-        // let files = vec![
-        //     File::open("D:\\projects\\MineGitFork\\test_files\\recover\\fileA.txt").unwrap(),
-        //     File::open("D:\\projects\\MineGitFork\\test_files\\recover\\fileD.txt").unwrap(),
-        //     File::open("D:\\projects\\MineGitFork\\test_files\\recover\\fileE.txt").unwrap()
-        // ];
-        // assert_eq!(test_files_recover(files), true);
-    }
+    let mut file = Vec::with_capacity(cap.max(snap.file_len as usize));
+    file.resize(snap.file_len as usize, 0);
+    _recover(pack, bheap, snap, &mut file);
+    Ok(file)
 }

@@ -19,11 +19,19 @@ impl DiffGenerator {
         }
     }
 
-    pub fn init<R1: Read, R2: Read>(&mut self, src: &mut R1, trg: &mut R2) -> io::Result<()> {
-        self.data.clear();
+    pub fn init(&mut self, src: &[u8], trg: &[u8]) -> io::Result<()> {
+        self.data.resize(src.len() + trg.len(), 0);
+        self.n = src.len();
+        self.data[..self.n].copy_from_slice(src);
+        self.data[self.n..].copy_from_slice(trg);
+        Ok(())
+    }
 
-        self.n = src.read_to_end(&mut self.data)?;
-        trg.read_to_end(&mut self.data)?;
+    pub fn init_new(&mut self, mut src: Vec<u8>, trg: &[u8]) -> io::Result<()> {
+        self.n = src.len();
+        src.resize(self.n + trg.len(), 0);
+        src[self.n..].copy_from_slice(trg);
+        self.data = src;
         Ok(())
     }
 
