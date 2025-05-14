@@ -2,8 +2,8 @@ use std::error::Error;
 
 use crate::{
     committer::add_commit,
-    savefiles::{Commit, COMMITS_FILE_NAME, DIRECTORY_NAME, IGNORE_FILE_NAME},
-    utils::fs_utils::{self, write_json_file},
+    savefiles::{DIRECTORY_NAME, IGNORE_FILE_NAME},
+    utils::fs_utils::{self},
 };
 
 pub fn init(target_path: &str) -> Result<(), Box<dyn Error>> {

@@ -54,5 +54,4 @@ impl IgnoreFilter {
 
         false
     }
-    // TODO: filter list of paths
 }
