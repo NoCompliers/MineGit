@@ -1,11 +1,9 @@
 use std::fs::{self, create_dir_all, DirEntry};
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use bitcode::{Decode, DecodeOwned, Encode};
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use bitcode::Encode;
 use sha2::{Digest, Sha256};
 
 pub fn is_path_exists(path: &str) -> bool {
@@ -14,7 +12,10 @@ pub fn is_path_exists(path: &str) -> bool {
 
 fn path_to_string(path: &Path) -> io::Result<String> {
     let path_str = path.to_str().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "Failed to convert path to string")
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Failed to convert path to string",
+        )
     })?;
     Ok(path_str.to_string())
 }
@@ -32,7 +33,7 @@ pub fn get_current_path() -> io::Result<String> {
     path_to_string(&path)
 }
 
-pub fn make_dir(path: &str) -> io::Result<()>{
+pub fn make_dir(path: &str) -> io::Result<()> {
     fs::create_dir(&path)?;
     Ok(())
 }
@@ -51,8 +52,8 @@ pub fn write_file(path: &str, buf: &[u8]) -> io::Result<File> {
 pub fn append_file(path: &str, buf: &[u8]) -> io::Result<(File, u64)> {
     let mut file = OpenOptions::new()
         .create(true)
-        .read(true)   // Needed for seeking
-        .write(true)  // Needed for writing
+        .read(true) // Needed for seeking
+        .write(true) // Needed for writing
         .open(path)?;
 
     let pos = file.seek(SeekFrom::End(0))?; // Get current file size (start of append)
@@ -65,7 +66,7 @@ pub fn open_to_write(path: &str, truncate: bool) -> io::Result<File> {
 
     // Ensure parent directories exist
     if let Some(parent) = path_obj.parent() {
-        create_dir_all(parent)?;  // Creates all missing directories in the path
+        create_dir_all(parent)?; // Creates all missing directories in the path
     }
 
     // Open the file with write options
@@ -77,22 +78,6 @@ pub fn open_to_write(path: &str, truncate: bool) -> io::Result<File> {
         .open(path_obj)
 }
 
-pub fn write_json_file<T: Serialize>(
-    dir_path: &str,
-    name: &str,
-    hidden: bool,
-    content: &T,
-) -> io::Result<File> {
-    // Serialize provided content
-    let json = serde_json::to_string(content)?;
-
-    // Create file path
-    let path = format!("{}/{}{}", dir_path, if hidden { "." } else { "" }, name);
-
-    // Write json to file
-    write_file(&path, json.as_bytes())
-}
-
 pub fn read_file(path: &str) -> Result<File, io::Error> {
     File::open(path)
 }
@@ -101,13 +86,6 @@ pub fn read_to_end(path: &str, buf: &mut Vec<u8>) -> Result<usize, io::Error> {
     let mut file = read_file(&path)?;
 
     file.read_to_end(buf)
-}
-
-pub fn read_json_file<T: DeserializeOwned>(path: &str) -> Result<T, Box<dyn std::error::Error>> {
-    let file = read_file(path)?; // Propagate IO errors
-    let reader = BufReader::new(file);
-    let value = serde_json::from_reader(reader)?; // Propagate JSON parsing errors
-    Ok(value)
 }
 
 pub fn files_equal(
@@ -163,11 +141,4 @@ pub fn file_hash(path: &str) -> io::Result<String> {
 
 pub fn encode_to_bytes<T: Encode>(content: &T) -> Vec<u8> {
     bitcode::encode(content)
-}
-
-pub fn decode_bytes<T: DecodeOwned>(file: &mut File) -> Result<T, Box<dyn std::error::Error>> {
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    let decoded = bitcode::decode(&buffer)?;
-    Ok(decoded)
 }

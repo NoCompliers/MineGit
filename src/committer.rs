@@ -5,7 +5,6 @@ use std::error::Error;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use tokio::task;
 use zstd::{decode_all, encode_all};
 
 use crate::ignore_filter::IgnoreFilter;
@@ -43,16 +42,14 @@ pub fn add_commit(target_path: &str, tag: &str) -> Result<(), Box<dyn std::error
         Ok(value) => {
             parent_id = value;
         }
-        Err(e) => {
+        Err(_) => {
             write_head(target_path, 0)?;
         }
     }
-    // Read previous commits to tie them with new one
-    let id = read_all_commits(target_path)?.len() as u32; //TODO: get just size // fallback
+    // Get commit id
+    let id = read_all_commits(target_path)?.len() as u32; //TODO: get just size
 
     // Create commit info
-    //let commit_info = create_commit_info(target_path, id, parent_id);
-
     let rt = Runtime::new().unwrap();
     let commit_info = rt.block_on(create_commit_info(target_path, id, parent_id))?;
 
@@ -170,7 +167,7 @@ pub fn restore(target_path: &str, commit_id: u32) -> Result<(), Box<dyn Error>> 
 
     // Restore files
     for file_info in commit_info.file_info {
-        let origin_path = fixed_bytes_to_str(&file_info.0); //file_info.1.local_path_as_str()?;
+        let origin_path = fixed_bytes_to_str(&file_info.0);
         let package_path =
             fs_utils::build_path([&root_path, "data", &format!("{origin_path}.pkg")])?;
 
@@ -244,13 +241,6 @@ fn fixed_bytes_to_str<const N: usize>(bytes: &[u8; N]) -> String {
     String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
-struct Res {
-    k: [u8; 128],
-    v: FileInfo,
-}
-
-// fn create_package(origin_path: &str, root_path: &str) -> Result<Res, Box<dyn Error>> {}
-
 async fn create_commit_info(
     target_path: &str,
     id: u32,
@@ -282,13 +272,10 @@ async fn create_commit_info(
         v: FileInfo,
     }
 
-    let root_path = get_root_path(target_path).unwrap();
-
     let root = Arc::new(root_path);
     let p_inf = Arc::new(parent_info);
 
     for origin_path in file_paths {
-        //let origin_p = Arc::new(origin_path);
         let origin_p = Arc::new(origin_path);
         let root = Arc::clone(&root);
         let p_inf = Arc::clone(&p_inf);
@@ -296,14 +283,9 @@ async fn create_commit_info(
             let root_path = Arc::as_ref(&root);
             let origin_path = Arc::as_ref(&origin_p);
             let parent_info = Arc::as_ref(&p_inf);
-            // let root_path = Arc::as_ref(&root);
-            // let origin_path = Arc::as_ref(&origin_p);
-            // let parent_info = Arc::as_ref(&p_inf);
 
             let path_bytes = str_to_fixed_bytes::<128>(&origin_path);
             let hash_bytes = str_to_fixed_bytes::<256>(&fs_utils::file_hash(&origin_path).unwrap());
-
-            //print!("{}", hash_bytes[0]);
 
             // Check if packageExist
             let output_path =
@@ -327,15 +309,6 @@ async fn create_commit_info(
                                 package_pos: parent_file_info.package_pos,
                             },
                         };
-
-                        // file_infos.insert(
-                        //     path_bytes,
-                        //     FileInfo {
-                        //         hash: hash_bytes,
-                        //         package_pos: parent_file_info.package_pos,
-                        //     },
-                        // );
-                        //return;
                     }
 
                     // Load parent snapshot // TODO: it gets last, not the parent oone
@@ -347,7 +320,7 @@ async fn create_commit_info(
                     );
                     package
                         .seek(io::SeekFrom::Start(parent_file_info.package_pos))
-                        .unwrap(); //TODO: set parent here.unwrap()
+                        .unwrap();
                     let parent_snapshot = SnapshotHeader::deserialize(&mut package).unwrap();
 
                     // needs whole package and snapshot header
@@ -364,20 +337,6 @@ async fn create_commit_info(
                     diff.generate(&mut diff_data).unwrap();
 
                     package.seek(io::SeekFrom::End(0)).unwrap();
-
-                    // Save pos in package
-                    // file_infos
-                    //     .get_mut(&path_bytes)
-                    //     .ok_or("no file info").unwrap()
-                    //     .package_pos = package.stream_position().unwrap() as u64;
-
-                    // file_infos.insert(
-                    //     path_bytes,
-                    //     FileInfo {
-                    //         hash: hash_bytes,
-                    //         package_pos: package.stream_position().unwrap() as u64,
-                    //     },
-                    // );
 
                     let pkg_pos = package.stream_position().unwrap() as u64;
 
@@ -423,18 +382,13 @@ async fn create_commit_info(
         handels.push(handle);
     }
 
-    //let mut results = Vec::new();
-
     for handle in handels {
         let res = (handle.await)?;
-        //results.push(handle.await);
         file_infos.insert(res.k, res.v);
-        //handle.await.unwrap();
     }
 
     Ok(CommitInfo {
         id,
-        //file_info_length: files.len() as u32,
         file_info: file_infos,
     })
 }

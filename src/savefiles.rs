@@ -66,61 +66,8 @@ pub struct CommitInfo {
     pub file_info: HashMap<[u8; 128], FileInfo>,
 }
 
-// impl fmt::Display for CommitInfo {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         writeln!(f, "CommitInfo {{ id: {} }}", self.id)?;
-//         writeln!(f, "FileInfos ({} items):", self.file_info.len())?;
-
-//         for (i, fi) in self.file_info.iter().enumerate() {
-//             writeln!(f, "  [{}] {}", i, fi.1)?;
-//         }
-
-//         Ok(())
-//     }
-// }
-
 #[derive(Debug, Encode, Decode)]
 pub struct FileInfo {
     pub hash: [u8; 256],
     pub package_pos: u64,
 }
-
-// impl fmt::Display for FileInfo {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         let local_path = match self.local_path_as_str() {
-//             Ok(s) => s,
-//             Err(_) => "<invalid UTF-8>",
-//         };
-
-//         let hash = match self.hash_as_str() {
-//             Ok(s) => s,
-//             Err(_) => "<invalid UTF-8>",
-//         };
-
-//         write!(
-//             f,
-//             "FileInfo {{ local_path: \"{}\", hash: \"{}\", package_pos: {} }}",
-//             local_path, hash, self.package_pos
-//         )
-//     }
-// }
-
-// impl FileInfo {
-//     pub fn local_path_as_str(&self) -> Result<&str, std::str::Utf8Error> {
-//         let end = self
-//             .local_path
-//             .iter()
-//             .position(|&b| b == 0)
-//             .unwrap_or(self.local_path.len());
-//         std::str::from_utf8(&self.local_path[..end])
-//     }
-
-//     pub fn hash_as_str(&self) -> Result<&str, std::str::Utf8Error> {
-//         let end = self
-//             .hash
-//             .iter()
-//             .position(|&b| b == 0)
-//             .unwrap_or(self.hash.len());
-//         std::str::from_utf8(&self.hash[..end])
-//     }
-// }
