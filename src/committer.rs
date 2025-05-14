@@ -3,6 +3,9 @@ use chrono::Local;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
+use std::sync::Arc;
+use tokio::runtime::Runtime;
+use tokio::task;
 use zstd::{decode_all, encode_all};
 
 use crate::ignore_filter::IgnoreFilter;
@@ -50,7 +53,11 @@ pub fn add_commit(target_path: &str, tag: &str) -> Result<(), Box<dyn std::error
     let id = read_all_commits(target_path)?.len() as u32; //TODO: get just size // fallback
 
     // Create commit info
-    let commit_info = create_commit_info(target_path, id, parent_id)?;
+    //let commit_info = create_commit_info(target_path, id, parent_id);
+
+    let rt = Runtime::new().unwrap();
+    let commit_info = rt.block_on(create_commit_info(target_path, id, parent_id))?;
+
     let commit_info_bytes = fs_utils::encode_to_bytes(&commit_info);
 
     // Compress using zstd
@@ -230,7 +237,14 @@ fn fixed_bytes_to_str<const N: usize>(bytes: &[u8; N]) -> String {
     String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
-fn create_commit_info(
+struct Res {
+    k: [u8; 128],
+    v: FileInfo,
+}
+
+// fn create_package(origin_path: &str, root_path: &str) -> Result<Res, Box<dyn Error>> {}
+
+async fn create_commit_info(
     target_path: &str,
     id: u32,
     parent_id: u32,
@@ -254,92 +268,162 @@ fn create_commit_info(
         )?);
     }
 
+    let mut handels = vec![];
+
+    struct Res {
+        k: [u8; 128],
+        v: FileInfo,
+    }
+
+    let root_path = get_root_path(target_path).unwrap();
+
+    let root = Arc::new(root_path);
+    let p_inf = Arc::new(parent_info);
+
     for origin_path in file_paths {
-        let path_bytes = str_to_fixed_bytes::<128>(&origin_path);
-        let hash_bytes = str_to_fixed_bytes::<256>(&fs_utils::file_hash(&origin_path)?);
+        //let origin_p = Arc::new(origin_path);
+        let origin_p = Arc::new(origin_path);
+        let root = Arc::clone(&root);
+        let p_inf = Arc::clone(&p_inf);
+        let handle = tokio::spawn(async move {
+            let root_path = Arc::as_ref(&root);
+            let origin_path = Arc::as_ref(&origin_p);
+            let parent_info = Arc::as_ref(&p_inf);
+            // let root_path = Arc::as_ref(&root);
+            // let origin_path = Arc::as_ref(&origin_p);
+            // let parent_info = Arc::as_ref(&p_inf);
 
-        // Check if packageExist
-        let output_path =
-            fs_utils::build_path([&root_path, "data", &format!("{origin_path}.pkg")])?;
+            let path_bytes = str_to_fixed_bytes::<128>(&origin_path);
+            let hash_bytes = str_to_fixed_bytes::<256>(&fs_utils::file_hash(&origin_path).unwrap());
 
-        if fs_utils::is_path_exists(&output_path) {
-            if let Some(ref parent_info) = parent_info {
-                let parent_file_info = parent_info
-                    .file_info
-                    .get(&path_bytes)
-                    .ok_or("parent_file_info is uninitialized")?;
+            //print!("{}", hash_bytes[0]);
 
-                file_infos.insert(
-                    path_bytes,
-                    FileInfo {
-                        hash: hash_bytes,
-                        package_pos: parent_file_info.package_pos,
-                    },
-                );
+            // Check if packageExist
+            let output_path =
+                fs_utils::build_path([&root_path, "data", &&format!("{}.pkg", origin_path)])
+                    .unwrap();
 
-                // Check if file have changed
-                if hash_bytes == parent_file_info.hash {
-                    continue;
+            if fs_utils::is_path_exists(&output_path) {
+                if let Some(ref parent_info) = parent_info {
+                    let parent_file_info = parent_info
+                        .file_info
+                        .get(&path_bytes)
+                        .ok_or("parent_file_info is uninitialized")
+                        .unwrap();
+
+                    // Check if file have changed
+                    if hash_bytes == parent_file_info.hash {
+                        return Res {
+                            k: path_bytes,
+                            v: FileInfo {
+                                hash: hash_bytes,
+                                package_pos: parent_file_info.package_pos,
+                            },
+                        };
+
+                        // file_infos.insert(
+                        //     path_bytes,
+                        //     FileInfo {
+                        //         hash: hash_bytes,
+                        //         package_pos: parent_file_info.package_pos,
+                        //     },
+                        // );
+                        //return;
+                    }
+
+                    // Load parent snapshot // TODO: it gets last, not the parent oone
+                    let mut package = fs_utils::open_to_write(&output_path, false).unwrap();
+                    print!(
+                        "{}Size: {}\n",
+                        output_path,
+                        package.metadata().unwrap().len()
+                    );
+                    package
+                        .seek(io::SeekFrom::Start(parent_file_info.package_pos))
+                        .unwrap(); //TODO: set parent here.unwrap()
+                    let parent_snapshot = SnapshotHeader::deserialize(&mut package).unwrap();
+
+                    // needs whole package and snapshot header
+                    package.seek(io::SeekFrom::Start(0)).unwrap();
+                    let recovered = recover(&mut package, parent_snapshot.clone()).unwrap();
+
+                    let mut origin = fs_utils::open_to_write(&origin_path, false).unwrap();
+
+                    // Generate difference
+                    let mut diff = DiffGenerator::new();
+                    let mut diff_data: Vec<u8> = Vec::new();
+                    let mut cur_data = Cursor::new(recovered);
+                    diff.init(&mut cur_data, &mut origin).unwrap();
+                    diff.generate(&mut diff_data).unwrap();
+
+                    package.seek(io::SeekFrom::End(0)).unwrap();
+
+                    // Save pos in package
+                    // file_infos
+                    //     .get_mut(&path_bytes)
+                    //     .ok_or("no file info").unwrap()
+                    //     .package_pos = package.stream_position().unwrap() as u64;
+
+                    // file_infos.insert(
+                    //     path_bytes,
+                    //     FileInfo {
+                    //         hash: hash_bytes,
+                    //         package_pos: package.stream_position().unwrap() as u64,
+                    //     },
+                    // );
+
+                    let pkg_pos = package.stream_position().unwrap() as u64;
+
+                    // Generate snapshot
+                    let snapshot = SnapshotHeader {
+                        depend_on: parent_snapshot.pos - 25,
+                        payload_len: diff_data.len() as u64,
+                        file_len: origin.metadata().unwrap().len(),
+                        pos: package.stream_position().unwrap() as u64, // useless
+                        is_zipped: false,
+                        is_mca_file: false,
+                    };
+
+                    // Append snapshot to package
+                    snapshot.serialize(&mut package).unwrap();
+                    package.write_all(&diff_data).unwrap();
+
+                    return Res {
+                        k: path_bytes,
+                        v: FileInfo {
+                            hash: hash_bytes,
+                            package_pos: pkg_pos,
+                        },
+                    };
+                } else {
+                    panic!("parent_info is uninitialized");
                 }
-
-                // Load parent snapshot // TODO: it gets last, not the parent oone
-                let mut package = fs_utils::open_to_write(&output_path, false)?;
-                print!("{}Size: {}\n", output_path, package.metadata()?.len());
-                package.seek(io::SeekFrom::Start(parent_file_info.package_pos))?; //TODO: set parent here?
-                let parent_snapshot = SnapshotHeader::deserialize(&mut package)?;
-
-                // needs whole package and snapshot header
-                package.seek(io::SeekFrom::Start(0))?;
-                let recovered = recover(&mut package, parent_snapshot.clone())?;
-
-                let mut origin = fs_utils::open_to_write(&origin_path, false)?;
-
-                // Generate difference
-                let mut diff = DiffGenerator::new();
-                let mut diff_data: Vec<u8> = Vec::new();
-                let mut cur_data = Cursor::new(recovered);
-                diff.init(&mut cur_data, &mut origin)?;
-                diff.generate(&mut diff_data)?;
-
-                package.seek(io::SeekFrom::End(0))?;
-
-                // Save pos in package
-                file_infos
-                    .get_mut(&path_bytes)
-                    .ok_or("no file info")?
-                    .package_pos = package.stream_position()? as u64;
-
-                // Generate snapshot
-                let snapshot = SnapshotHeader {
-                    depend_on: parent_snapshot.pos - 25,
-                    payload_len: diff_data.len() as u64,
-                    file_len: origin.metadata()?.len(),
-                    pos: package.stream_position()? as u64, // useless
-                    is_zipped: false,
-                    is_mca_file: false,
-                };
-
-                // Append snapshot to package
-                snapshot.serialize(&mut package)?;
-                package.write_all(&diff_data)?;
             } else {
-                panic!("parent_info is uninitialized");
-            }
-        } else {
-            // Create new package file with original file
-            let mut new_package = fs_utils::open_to_write(&output_path, false)?;
-            let mut data = Vec::new();
-            fs_utils::read_to_end(&origin_path, &mut data)?;
-            SnapshotHeader::store_file(&mut new_package, &data, false)?; //TODO: mca?
+                // Create new package file with original file
+                let mut new_package = fs_utils::open_to_write(&output_path, false).unwrap();
+                let mut data = Vec::new();
+                fs_utils::read_to_end(&origin_path, &mut data).unwrap();
+                SnapshotHeader::store_file(&mut new_package, &data, false).unwrap(); //TODO: mca?
 
-            file_infos.insert(
-                path_bytes,
-                FileInfo {
-                    hash: hash_bytes,
-                    package_pos: 0,
-                },
-            );
-        }
+                return Res {
+                    k: path_bytes,
+                    v: FileInfo {
+                        hash: hash_bytes,
+                        package_pos: 0,
+                    },
+                };
+            }
+        });
+        handels.push(handle);
+    }
+
+    //let mut results = Vec::new();
+
+    for handle in handels {
+        let res = (handle.await)?;
+        //results.push(handle.await);
+        file_infos.insert(res.k, res.v);
+        //handle.await.unwrap();
     }
 
     Ok(CommitInfo {
