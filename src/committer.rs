@@ -170,24 +170,85 @@ pub fn read_all_commits(target_path: &str) -> io::Result<Vec<Commit>> {
     Ok(commits)
 }
 
-pub fn restore(target_path: &str, commit_id: u32) -> Result<(), Box<dyn Error>> {
+pub fn restore(
+    target_path: &str,
+    commit_id: u32,
+    regions: Vec<[i32; 3]>,
+) -> Result<(), Box<dyn Error>> {
     // Get commit
     let commit = get_commit_by_id(target_path, commit_id)?;
     let commit_info_file = fs_utils::read_file(&get_commits_info_path(target_path)?)?;
-    let commit_info = read_commit_info(&commit_info_file, commit.info_pos, commit.info_length)?;
+    let mut commit_info = read_commit_info(&commit_info_file, commit.info_pos, commit.info_length)?;
 
     // Delete unnecessary files
     let root_path = get_root_path(&target_path)?;
-    let file_paths = get_not_ignored_files_in_directory(&target_path)?;
-    for entry in file_paths {
-        if !commit_info
-            .file_info
-            .contains_key(&str_to_fixed_bytes::<128>(&entry))
-        {
-            if fs_utils::is_path_exists(&entry) {
-                fs_utils::remove_file(&entry)?;
+    let mut file_paths = get_not_ignored_files_in_directory(&target_path)?;
+    if regions.len() == 0 {
+        for entry in file_paths {
+            if !commit_info
+                .file_info
+                .contains_key(&str_to_fixed_bytes::<128>(&entry))
+            {
+                if fs_utils::is_path_exists(&entry) {
+                    fs_utils::remove_file(&entry)?;
+                }
             }
         }
+    } else {
+        // Clean non mca files
+        file_paths.retain(|file| {
+            if !file.ends_with(".mca") || !file.contains("r.") {
+                return false;
+            }
+
+            // Extract dimension from path
+            let dim = if file.starts_with("DIM1") {
+                1
+            } else if file.starts_with("DIM-1") {
+                -1
+            } else if file.starts_with("region")
+                || file.starts_with("poi")
+                || file.starts_with("entities")
+            {
+                0
+            } else {
+                return false; // Unknown dimension
+            };
+
+            // Remove ".mca" and split by '.'
+            let trimmed = &file[..file.len() - 4];
+            let parts: Vec<&str> = trimmed.split('.').collect();
+
+            if parts.len() != 3 {
+                return false;
+            }
+
+            let x = parts[1].parse::<i32>().ok();
+            let z = parts[2].parse::<i32>().ok();
+
+            match (x, z) {
+                (Some(x), Some(z)) => {
+                    if !regions
+                        .iter()
+                        .any(|f| f[1] == x && f[2] == z && f[0] == dim)
+                    {
+                        return false;
+                    }
+
+                    // Check if region exists in commit
+                    return commit_info
+                        .file_info
+                        .contains_key(&str_to_fixed_bytes::<128>(&file));
+                }
+                _ => false,
+            }
+        });
+
+        commit_info
+            .file_info
+            .retain(|k, _| file_paths.contains(&fixed_bytes_to_str(k)));
+
+        println!("Restored files: {:?}", file_paths);
     }
 
     // Restore files

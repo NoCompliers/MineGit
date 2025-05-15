@@ -80,9 +80,12 @@
             },
             "args": [
                 "restore",
-                "2"
+                "1",
+                "--regions",
+                "0,-1,0",
+                "4,5,6"
             ],
-            "cwd": "/home/vr/Desktop/New Folder (1)/"
+            "cwd": "/home/vr/Documents/University/4_Semester/RUST/minecraft saves/Test"
         },
         {
             "type": "lldb",

@@ -25,7 +25,7 @@ pub fn run() {
             committer::print_all_commits(&root_path).unwrap();
         }
         Commands::Restore(args) => {
-            committer::restore(&root_path, args.id).unwrap();
+            committer::restore(&root_path, args.id, args.regions).unwrap();
         }
         Commands::Compare(args) => {
             // Compare files

@@ -34,4 +34,23 @@ pub struct CommitArgs {
 #[derive(Debug, Args)]
 pub struct RestoreArgs {
     pub id: u32,
+
+    /// List of 3-element integer arrays (e.g. --regions 1,2,3 4,5,6)
+    #[clap(short, long, value_parser=parse_region, num_args=1.., value_delimiter = ' ', allow_hyphen_values = true)]
+    pub regions: Vec<[i32; 3]>,
+}
+
+// Custom parser for [i32; 3]
+fn parse_region(s: &str) -> Result<[i32; 3], String> {
+    let parts: Vec<_> = s.split(',').collect();
+    if parts.len() != 3 {
+        return Err("Each region must have exactly three comma-separated integers".into());
+    }
+
+    let nums: Result<Vec<_>, _> = parts.iter().map(|p| p.trim().parse::<i32>()).collect();
+
+    match nums {
+        Ok(v) if v.len() == 3 => Ok([v[0], v[1], v[2]]),
+        _ => Err("Failed to parse all three integers".into()),
+    }
 }
