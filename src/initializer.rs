@@ -24,6 +24,6 @@ pub fn init(target_path: &str) -> Result<(), Box<dyn Error>> {
         patterns.join("\n").as_bytes(),
     )?;
 
-    add_commit(&target_path, "Initial Commit.")?;
+    add_commit(&target_path, "Initial Commit.", Vec::new())?;
     Ok(())
 }

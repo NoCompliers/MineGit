@@ -29,6 +29,10 @@ pub struct CompareArgs {
 #[derive(Debug, Args)]
 pub struct CommitArgs {
     pub tag: String,
+
+    /// List of 3-element integer arrays (e.g. --regions 1,2,3 4,5,6)
+    #[clap(short, long, value_parser=parse_region, num_args=1.., value_delimiter = ' ', allow_hyphen_values = true)]
+    pub regions: Vec<[i32; 3]>,
 }
 
 #[derive(Debug, Args)]

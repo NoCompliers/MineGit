@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
+use std::u64::MAX;
 use tokio::runtime::Runtime;
 use zstd::{decode_all, encode_all};
 
@@ -31,7 +32,11 @@ fn get_commits_info_path(target_path: &str) -> io::Result<String> {
     fs_utils::build_path([&get_root_path(target_path)?, COMMITS_INFO_FILE_NAME])
 }
 
-pub fn add_commit(target_path: &str, tag: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn add_commit(
+    target_path: &str,
+    tag: &str,
+    regions: Vec<[i32; 3]>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let commits_path = get_commits_path(target_path)?;
     let commits_info_path = get_commits_info_path(target_path)?;
 
@@ -49,7 +54,7 @@ pub fn add_commit(target_path: &str, tag: &str) -> Result<(), Box<dyn std::error
     let id = get_commit_count(target_path)?;
     // Create commit info
     let rt = Runtime::new().unwrap();
-    let commit_info = rt.block_on(create_commit_info(target_path, id, parent_id))?;
+    let commit_info = rt.block_on(create_commit_info(target_path, id, parent_id, regions))?;
 
     let commit_info_bytes = fs_utils::encode_to_bytes(&commit_info);
 
@@ -194,53 +199,12 @@ pub fn restore(
             }
         }
     } else {
-        // Clean non mca files
+        // Clean other files files
         file_paths.retain(|file| {
-            if !file.ends_with(".mca") || !file.contains("r.") {
-                return false;
-            }
-
-            // Extract dimension from path
-            let dim = if file.starts_with("DIM1") {
-                1
-            } else if file.starts_with("DIM-1") {
-                -1
-            } else if file.starts_with("region")
-                || file.starts_with("poi")
-                || file.starts_with("entities")
-            {
-                0
-            } else {
-                return false; // Unknown dimension
-            };
-
-            // Remove ".mca" and split by '.'
-            let trimmed = &file[..file.len() - 4];
-            let parts: Vec<&str> = trimmed.split('.').collect();
-
-            if parts.len() != 3 {
-                return false;
-            }
-
-            let x = parts[1].parse::<i32>().ok();
-            let z = parts[2].parse::<i32>().ok();
-
-            match (x, z) {
-                (Some(x), Some(z)) => {
-                    if !regions
-                        .iter()
-                        .any(|f| f[1] == x && f[2] == z && f[0] == dim)
-                    {
-                        return false;
-                    }
-
-                    // Check if region exists in commit
-                    return commit_info
-                        .file_info
-                        .contains_key(&str_to_fixed_bytes::<128>(&file));
-                }
-                _ => false,
-            }
+            path_is_in_regions(file, &regions)
+                && commit_info
+                    .file_info
+                    .contains_key(&str_to_fixed_bytes::<128>(&file))
         });
 
         commit_info
@@ -270,6 +234,42 @@ pub fn restore(
     write_head(target_path, commit_id)?;
 
     Ok(())
+}
+
+fn path_is_in_regions(path: &str, regions: &Vec<[i32; 3]>) -> bool {
+    if !path.ends_with(".mca") || !path.contains("r.") {
+        return false;
+    }
+
+    // Extract dimension from path
+    let dim = if path.starts_with("DIM1") {
+        1
+    } else if path.starts_with("DIM-1") {
+        -1
+    } else if path.starts_with("region") || path.starts_with("poi") || path.starts_with("entities")
+    {
+        0
+    } else {
+        return false; // Unknown dimension
+    };
+
+    // Remove ".mca" and split by '.'
+    let trimmed = &path[..path.len() - 4];
+    let parts: Vec<&str> = trimmed.split('.').collect();
+
+    if parts.len() != 3 {
+        return false;
+    }
+
+    let x = parts[1].parse::<i32>().ok();
+    let z = parts[2].parse::<i32>().ok();
+
+    match (x, z) {
+        (Some(x), Some(z)) => regions
+            .iter()
+            .any(|f| f[1] == x && f[2] == z && f[0] == dim),
+        _ => false,
+    }
 }
 
 pub fn read_commit_info<R: Read + Seek>(
@@ -330,6 +330,7 @@ async fn create_commit_info(
     target_path: &str,
     id: u32,
     parent_id: u32,
+    regions: Vec<[i32; 3]>,
 ) -> Result<CommitInfo, Box<dyn Error>> {
     let root_path = get_root_path(&target_path)?;
     let commits_info_file = fs_utils::open_to_write(&get_commits_info_path(target_path)?, false)?;
@@ -359,11 +360,15 @@ async fn create_commit_info(
 
     let root = Arc::new(root_path);
     let p_inf = Arc::new(parent_info);
+    let regions = Arc::new(regions);
 
     for origin_path in file_paths {
         let origin_p = Arc::new(origin_path);
+
+        let regions = Arc::clone(&regions);
         let root = Arc::clone(&root);
         let p_inf = Arc::clone(&p_inf);
+
         let handle = tokio::spawn(async move {
             let root_path = Arc::as_ref(&root);
             let origin_path = Arc::as_ref(&origin_p);
@@ -371,6 +376,8 @@ async fn create_commit_info(
 
             let path_bytes = str_to_fixed_bytes::<128>(&origin_path);
             let hash_bytes = str_to_fixed_bytes::<256>(&fs_utils::file_hash(&origin_path).unwrap());
+
+            let include_in_commit = regions.len() == 0 || path_is_in_regions(origin_path, &regions);
 
             // Check if packageExist
             let output_path =
@@ -386,7 +393,7 @@ async fn create_commit_info(
                         .unwrap();
 
                     // Check if file have changed
-                    if hash_bytes == parent_file_info.hash {
+                    if hash_bytes == parent_file_info.hash || !include_in_commit {
                         return Res {
                             k: path_bytes,
                             v: FileInfo {
@@ -418,7 +425,7 @@ async fn create_commit_info(
                 } else {
                     panic!("parent_info is uninitialized");
                 }
-            } else {
+            } else if include_in_commit {
                 // Create new package file with original file
                 let mut new_package = fs_utils::open_to_write(&output_path, false).unwrap();
                 let mut data = Vec::new();
@@ -432,6 +439,14 @@ async fn create_commit_info(
                         package_pos: 0,
                     },
                 };
+            } else {
+                return Res {
+                    k: path_bytes,
+                    v: FileInfo {
+                        hash: hash_bytes,
+                        package_pos: MAX,
+                    },
+                };
             }
         });
         handels.push(handle);
@@ -439,7 +454,9 @@ async fn create_commit_info(
 
     for handle in handels {
         let res = (handle.await)?;
-        file_infos.insert(res.k, res.v);
+        if res.v.package_pos != MAX {
+            file_infos.insert(res.k, res.v);
+        }
     }
 
     Ok(CommitInfo {

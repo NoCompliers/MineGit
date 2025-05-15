@@ -19,7 +19,7 @@ pub fn run() {
         }
         Commands::Status => {}
         Commands::Commit(args) => {
-            committer::add_commit(&root_path, &args.tag).unwrap();
+            committer::add_commit(&root_path, &args.tag, args.regions).unwrap();
         }
         Commands::List => {
             committer::print_all_commits(&root_path).unwrap();

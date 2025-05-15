@@ -1,8 +1,8 @@
-use std::fs::{File};
-use std::io::{self, Cursor, Read, Seek, Write};
-use byteorder::{WriteBytesExt, ReadBytesExt, BigEndian};
-use zstd::encode_all;
 use crate::recover::diff::Insert;
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use std::fs::File;
+use std::io::{self, Cursor, Read, Seek, Write};
+use zstd::encode_all;
 
 use super::diff_gen::DiffGenerator;
 use super::recover::recover;
@@ -15,17 +15,17 @@ pub struct SnapshotHeader {
     pub payload_len: u64,
     pub file_len: u64,
     pub pos: u64,
-    pub is_zipped: bool
+    pub is_zipped: bool,
 }
 
 impl Default for SnapshotHeader {
     fn default() -> Self {
         Self {
-            depend_on: u64::MAX, 
+            depend_on: u64::MAX,
             payload_len: 0,
             file_len: 0,
             pos: u64::MAX,
-            is_zipped: false
+            is_zipped: false,
         }
     }
 }
@@ -53,7 +53,7 @@ impl SnapshotHeader {
         let mut diff_data: Vec<u8> = Vec::new();
         diff.generate(&mut diff_data)?;
 
-        let diff_data = encode_all(Cursor::new(diff_data), 16).expect("Compression failed");
+        //let diff_data = encode_all(Cursor::new(diff_data), 16).expect("Compression failed");
 
         pack.seek(io::SeekFrom::End(0))?;
         let snap = Self {
@@ -61,7 +61,7 @@ impl SnapshotHeader {
             payload_len: diff_data.len() as u64,
             file_len: f.len() as u64,
             pos: pack.stream_position()? + Self::SERIZIZED_SIZE as u64,
-            is_zipped: true,
+            is_zipped: false,
         };
         snap.serialize(pack)?;
         pack.write_all(&diff_data)?;
