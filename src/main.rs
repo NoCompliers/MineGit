@@ -13,7 +13,7 @@ mod recover {
     pub mod diff_gen;
     pub mod recover;
     pub mod snapshot;
-    mod test;
+    pub mod test;
 }
 
 fn main() {

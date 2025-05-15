@@ -1,13 +1,9 @@
 use crate::recover::diff::Insert;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::fs::File;
-use std::io::{self, Cursor, Read, Seek, Write};
-use zstd::encode_all;
+use std::io::{self, Read, Seek, Write};
 
 use super::diff_gen::DiffGenerator;
 use super::recover::recover;
-
-const HEADER_SIZE: usize = 1024 * 4 * 2;
 
 #[derive(Clone)]
 pub struct SnapshotHeader {
@@ -68,7 +64,7 @@ impl SnapshotHeader {
         Ok(snap)
     }
 
-    pub fn restore<R: Read + Seek>(&self, pack: &mut R) -> io::Result<Vec<u8>> {
+    pub fn recover<R: Read + Seek>(&self, pack: &mut R) -> io::Result<Vec<u8>> {
         Ok(recover(pack, self.clone())?)
     }
 
@@ -89,17 +85,5 @@ impl SnapshotHeader {
         res.is_zipped = (bits & 1) != 0;
         res.pos = r.stream_position()?;
         Ok(res)
-    }
-
-    fn _get_header(f: &mut File, offset: u64) -> io::Result<Vec<u8>> {
-        f.seek(io::SeekFrom::Start(offset))?;
-        let snapheader = SnapshotHeader::deserialize(f)?;
-        if !snapheader.is_zipped {
-            f.seek(io::SeekFrom::Current(-(offset as i64)))?;
-        }
-        let mut data = vec![0u8; HEADER_SIZE];
-        f.read_exact(&mut data)?;
-
-        Ok(vec![])
     }
 }

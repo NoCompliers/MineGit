@@ -8,11 +8,6 @@ pub struct Copy {
 }
 
 #[derive(Debug)]
-pub struct Insert {
-    pub data: Vec<u8>
-}
-
-#[derive(Debug)]
 pub struct InsertHeader {
     pub len: u64
 }
@@ -34,6 +29,7 @@ impl Copy {
     }
 }
 
+pub struct Insert {}
 impl Insert {
     pub const SERIZIZED_SIZE: u64 = 4;
     pub fn serialize<W: Write>(data: &[u8], out: &mut W) -> io::Result<()> {

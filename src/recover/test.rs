@@ -1,5 +1,5 @@
 #[test]
-fn test() {
+pub fn test() {
     use std::{fs::{File, OpenOptions}, io::Read};
     use super::snapshot::SnapshotHeader;
 
@@ -14,10 +14,12 @@ fn test() {
 
     let mut pack = OpenOptions::new().create(true).truncate(true).write(true).read(true)
         .open("D:\\projects\\MineGit3\\test_files\\pkg.pkg").unwrap();
-    let snap1 = SnapshotHeader::save_new(&mut pack, &mut data1).unwrap();
-    let snap2 = snap1.update(&mut pack, &mut data2).unwrap();
-    let _data1 = snap1.restore(&mut pack).unwrap();
-    let _data2 = snap2.restore(&mut pack).unwrap();
+
+    let snap1 = SnapshotHeader::save_new(&mut pack, &data1).unwrap();
+    let snap2 = snap1.update(&mut pack, &data2).unwrap();
+
+    let _data1 = snap1.recover(&mut pack).unwrap();
+    let _data2 = snap2.recover(&mut pack).unwrap();
     if data1 != _data1 {
         panic!("Recover test fail because of incorrect snap1 recovery");
     }
@@ -25,8 +27,14 @@ fn test() {
         panic!("Recover test fail because of incorrect snap2 recovery");
     }
 
-    let snap3 = snap1.update(&mut pack, &data2).expect("Error while updating snap3 in test");;
-    let data3 = snap3.restore(&mut pack).expect("Error while recovering snap3 in test");
+    let snap3 = snap2.update(&mut pack, &data1).unwrap();
+    let snap4 = snap3.update(&mut pack, &data2).unwrap();
+    if snap4.recover(&mut pack).expect("Error while recovering snap4") != data2 {
+        panic!("Incorect snap4 recover");
+    }
+
+    let snap3 = snap1.update(&mut pack, &data2).expect("Error while updating snap3 in test");
+    let data3 = snap3.recover(&mut pack).expect("Error while recovering snap3 in test");
     if data3 != data2 {
         panic!("Recover test fail because of incorrect snap3 recovery");
     }

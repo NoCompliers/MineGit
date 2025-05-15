@@ -9,7 +9,6 @@ use tokio::runtime::Runtime;
 use zstd::{decode_all, encode_all};
 
 use crate::ignore_filter::IgnoreFilter;
-use crate::recover::recover::recover;
 use crate::recover::snapshot::SnapshotHeader;
 use crate::savefiles::{CommitInfo, FileInfo, HEAD_FILE_NAME};
 use crate::{
@@ -226,8 +225,7 @@ pub fn restore(
         package_file.seek(io::SeekFrom::Start(file_info.1.package_pos))?;
         let snapshot = SnapshotHeader::deserialize(&mut package_file)?;
 
-        let recovered = recover(&mut package_file, snapshot.clone())?;
-
+        let recovered = snapshot.recover(&mut package_file)?;
         file.write_all(&recovered)?;
     }
 

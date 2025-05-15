@@ -1,5 +1,5 @@
 use divsufsort::sort_in_place;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use crate::recover::diff::*;
 
 const MIN_COPY_SIZE: usize = 16;
@@ -19,7 +19,7 @@ impl DiffGenerator {
         }
     }
 
-    pub fn init(&mut self, src: &[u8], trg: &[u8]) -> io::Result<()> {
+    pub fn _init(&mut self, src: &[u8], trg: &[u8]) -> io::Result<()> {
         self.data.resize(src.len() + trg.len(), 0);
         self.n = src.len();
         self.data[..self.n].copy_from_slice(src);
@@ -38,9 +38,8 @@ impl DiffGenerator {
     fn init_closest(&mut self) {
         let data = &self.data;
 
-        let mut idxs = vec![0; data.len()];
+        let mut idxs: Vec<i32> = vec![0; data.len()];
         sort_in_place(data, &mut idxs);
-
         let len = data.len();
         let n = self.n;
 
