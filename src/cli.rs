@@ -17,7 +17,6 @@ pub fn run() {
             println!("Init called");
             initializer::init(&root_path).unwrap_or_else(|e| println!("{e}"));
         }
-        Commands::Status => {}
         Commands::Commit(args) => {
             committer::add_commit(&root_path, &args.tag, args.regions).unwrap();
         }

@@ -10,11 +10,15 @@ pub struct MineGitArgs {
 // Command types
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// Create repo
     Init,
-    Status,
+    /// List all commits
     List,
+    /// Restore specific commit
     Restore(RestoreArgs),
+    /// Add new commit
     Commit(CommitArgs),
+    /// Compare hashes of 2 files
     Compare(CompareArgs),
 }
 
@@ -28,18 +32,20 @@ pub struct CompareArgs {
 
 #[derive(Debug, Args)]
 pub struct CommitArgs {
+    /// Commit tag
     pub tag: String,
 
-    /// List of 3-element integer arrays (e.g. --regions 1,2,3 4,5,6)
+    /// List of 3-element integer arrays dimension,x,z (e.g. --regions -1,0,0 0,1,0)
     #[clap(short, long, value_parser=parse_region, num_args=1.., value_delimiter = ' ', allow_hyphen_values = true)]
     pub regions: Vec<[i32; 3]>,
 }
 
 #[derive(Debug, Args)]
 pub struct RestoreArgs {
+    /// Commit id
     pub id: u32,
 
-    /// List of 3-element integer arrays (e.g. --regions 1,2,3 4,5,6)
+    /// List of 3-element integer arrays dimension,x,z (e.g. --regions -1,0,0 0,1,0)
     #[clap(short, long, value_parser=parse_region, num_args=1.., value_delimiter = ' ', allow_hyphen_values = true)]
     pub regions: Vec<[i32; 3]>,
 }
