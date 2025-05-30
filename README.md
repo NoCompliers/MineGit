@@ -32,8 +32,6 @@ We also used multithreading to allow different files to be saved in parallel, ma
 - Provide a command-line interface (CLI) for managing world versions.
 
 ## Dependencies
-Dependencies listed here might not be used in the final project:
-
 - bitcode: The bitcode dependency is used for encoding and decoding Commit data. It was chosen based on results from rust_serialization_benchmark, where it demonstrated the fastest serialization and deserialization speeds. Additionally, it produced compact serialized output that compressed especially well with zstd, which we use to compress file descriptions within commits.
 - bytemuck: The bytemuck dependency is used for safely converting data structures to and from raw byte slices when a static, predictable memory layout is required-for example, when writing fixed-size entries.
 - chrono: The chrono crate is used for working with timestamps and converting them into human-readable date and time formats.
